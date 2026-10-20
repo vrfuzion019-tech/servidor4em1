@@ -366,7 +366,7 @@ function iniciarAryanAlmeida() {
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     // Substitua a mídia abaixo quando tiver o vídeo do Aryan
-    const MIDIA_ARYAN = 'AgACAgEAAxkBAAMnaqLwihzilERlQhawn8_vLIOrBsoAAugMaxtaAxlFCQJwBIqWKe0BAAMCAAN5AAM9BA'; 
+    const MIDIA_ARYAN = 'BAACAgEAAxkBAAMFapIc9eVh_YzY9LXtb2LhovAJ89MAAqwIAAK7u5FEiAYu93eD9Kk9BA'; 
     const texto1 = `E aí, curtindo a visão? 😈\nQue bom que você apertou em Iniciar… Aqui não tem enrolação.\n\nSó conteúdo quente, sem censura e feito pra te deixar no grau 🔥\n\n🍑 Fotos exclusivas\n🎥 Vídeos sem corte\n💦 Conteúdos que não saem em lugar nenhum\n\nPra entrar no meu grupo VIP é só escolher o plano e pagar o PIX:`;
     const texto2 = `Assim que o PIX cair, o bot te libera na hora ⚡\nAcesso imediato, sem enrolação.\nTô te esperando 😈`;
 
