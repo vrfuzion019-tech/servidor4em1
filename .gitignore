@@ -1,0 +1,10 @@
+# Pastas do Node
+node_modules/
+npm-debug.log
+
+# Arquivos de Senhas e Variáveis (SEGURANÇA MAXIMA)
+.env
+
+# Arquivos de sistema operacional (Mac/Windows)
+.DS_Store
+Thumbs.db

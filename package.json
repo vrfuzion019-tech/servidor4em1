@@ -1,0 +1,19 @@
+{
+  "name": "central-de-bots-vip",
+  "version": "1.0.0",
+  "description": "Super Servidor 4-em-1 para automação VIP com Wiinpay",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "node-telegram-bot-api": "^0.64.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "Vitor Amaral",
+  "license": "ISC"
+}
