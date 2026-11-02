@@ -87,7 +87,7 @@ function iniciarAcervoBrasil() {
 
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
-    const textoLegenda = "🇧🇷 <b>PRIVATE BOY BR</b> 🇧🇷\n\nAqui você encontra as melhores chamadinhas, lives e vazados com atualização todo dia.\n\nNada de enrolação, o link é gerado automaticamente após o pagamento.\n\nEscolhe seu acesso:\n\n😈 <b>PLANO MENSAL</b>\n👉 30 dias de acesso — R\$ 14,90\n\n🔥 <b>Pagamento único. Acesso pra sempre.</b>\n👉 De <s>R\$ 60,00</s> por apenas R\$ 29,90\n\n⚠️ O acesso Vitalício está disponível até <b>" + getDataAmanha() + "</b>, são poucas vagas.\n\n🔒 Garante seu acesso agora 👇";
+    const textoLegenda = "🇧🇷 <b>ACERVO BRASIL +18</b> 🇧🇷\n\nAqui você encontra as melhores chamadinhas, lives e vazados com atualização todo dia.\n\nNada de enrolação, o link é gerado automaticamente após o pagamento.\n\nEscolhe seu acesso:\n\n😈 <b>PLANO MENSAL</b>\n👉 30 dias de acesso — R\$ 14,90\n\n🔥 <b>Pagamento único. Acesso pra sempre.</b>\n👉 De <s>R\$ 60,00</s> por apenas R\$ 29,90\n\n⚠️ O acesso Vitalício está disponível até <b>" + getDataAmanha() + "</b>, são poucas vagas.\n\n🔒 Garante seu acesso agora 👇";
     try { await bot.sendVideo(chatId, VIDEO_START, { caption: textoLegenda, parse_mode: "HTML", reply_markup: botoesPlanos }); } 
     catch (e) { await bot.sendMessage(chatId, textoLegenda, { parse_mode: "HTML", reply_markup: botoesPlanos }); }
   });
