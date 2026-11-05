@@ -201,11 +201,14 @@ function iniciarMlkBrasileiro() {
     try {
       await bot.sendPhoto(chatId, FOTO_START, { caption: textoLegenda, parse_mode: "HTML", reply_markup: botoesPlanos });
     } catch (e) {
+      console.error("Erro ao enviar foto no Mlk Brasileiro:", e.message);
       await bot.sendMessage(chatId, textoLegenda, { parse_mode: "HTML", reply_markup: botoesPlanos });
     }
 
     setTimeout(async () => { 
-      await bot.sendMessage(chatId, `⚠️ <b>Papo reto:</b> Assinantes tem um comando exclusivo (/resgatar) pra pegar o link de novo caso dê caô e o grupo caia.`, { parse_mode: 'HTML' }); 
+      try {
+        await bot.sendMessage(chatId, `⚠️ <b>Papo reto:</b> Assinantes tem um comando exclusivo (/resgatar) pra pegar o link de novo caso dê caô e o grupo caia.`, { parse_mode: 'HTML' }); 
+      } catch (err) {}
     }, 1000);
   });
 
