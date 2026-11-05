@@ -25,7 +25,7 @@ app.listen(PORT, '0.0.0.0', () => {
 });
 
 // ==========================================
-// 2. FUNÇÕES GLOBAIS DA WIINPAY (Economiza código)
+// 2. FUNÇÕES GLOBAIS DA WIINPAY
 // ==========================================
 function objetoPagamento(payload) {
   if (!payload || typeof payload !== 'object') return {};
@@ -104,8 +104,11 @@ function iniciarAcervoBrasil() {
       "⚠️ O acesso Vitalício está disponível até <b>" + getDataAmanha() + "</b>, são poucas vagas.\n\n" +
       "🔒 Garante seu acesso agora 👇";
 
-    try { await bot.sendVideo(chatId, VIDEO_START, { caption: textoLegenda, parse_mode: "HTML", reply_markup: botoesPlanos }); } 
-    catch (e) { await bot.sendMessage(chatId, textoLegenda, { parse_mode: "HTML", reply_markup: botoesPlanos }); }
+    try {
+      await bot.sendVideo(chatId, VIDEO_START, { caption: textoLegenda, parse_mode: "HTML", reply_markup: botoesPlanos });
+    } catch (e) {
+      await bot.sendMessage(chatId, textoLegenda, { parse_mode: "HTML", reply_markup: botoesPlanos });
+    }
   });
 
   bot.on("callback_query", async (query) => {
@@ -147,17 +150,6 @@ function iniciarAcervoBrasil() {
     }
   });
 
-  setInterval(() => {
-    const agora = Date.now();
-    for (const [chatId, dados] of pagamentosPendentes.entries()) {
-      const min = (agora - dados.timestamp) / 60000;
-      if (min >= 5 && dados.etapa === 0) { dados.etapa = 1; bot.sendMessage(chatId, `⏳ Mano, vi que você gerou o PIX mas não finalizou.\n\nO acesso é imediato, só falta o pagamento pra entrar! 🔥 Clica aí e garante antes que perca a vaga.`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); } 
-      else if (min >= 15 && dados.etapa === 1) { dados.etapa = 2; bot.sendMessage(chatId, `👀 E aí, vai ficar moscando?\n\nO grupo tá bombando agora mesmo! Copia o PIX ali em cima ou gera de novo. O bagulho é louco e sai na hora. 😈`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); }
-      else if (min >= 30 && dados.etapa === 2) { dados.etapa = 3; bot.sendMessage(chatId, `⚠️ SE LIGA: Seu código PIX vai expirar, parceiro!\n\nAinda dá tempo de colar com a gente. Finaliza o pagamento agora ou gera um novo código:`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); }
-      else if (min >= 60 && dados.etapa === 3) { bot.sendMessage(chatId, `🚨 ÚLTIMA CHAMADA!\n\nSeu pedido foi cancelado. Se ainda quiser colar com a gente, gera um novo pagamento aí embaixo 👇`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); pagamentosPendentes.delete(chatId); }
-    }
-  }, 60000); 
-
   bot.on('message', (msg) => {
     let fileId = null;
     if (msg.photo) fileId = msg.photo[msg.photo.length - 1].file_id; 
@@ -183,7 +175,7 @@ function iniciarMlkBrasileiro() {
   const vitalicios = []; 
   const pagamentosPendentes = new Map();
 
-  const VIDEO_START = 'AgACAgEAAxkBAAMKauyYIIuALKzh6EyonG1XDDHExk8AArYMaxtC6mhHNVO84I4U0FIBAAMCAAN5AAM9BA'; 
+  const FOTO_START = 'AgACAgEAAxkBAAMKauyYIIuALKzh6EyonG1XDDHExk8AArYMaxtC6mhHNVO84I4U0FIBAAMCAAN5AAM9BA'; 
   const botoesPlanos = {
     inline_keyboard: [
       [{ text: "🌍 Copy PayPal e-mail ($15)", url: "mailto:acervobr55@outlook.com?subject=VIP%20Access%20PayPal&body=Hello,%20I%20have%20sent%20the%20$15%20USD%20via%20PayPal.%20Here%20is%20my%20proof:" }],
@@ -206,9 +198,15 @@ function iniciarMlkBrasileiro() {
       `💎 <b>PLANO VITALÍCIO</b> (OFERTA RELÂMPAGO)\n👉 DE <s>R$ 60,00</s> POR APENAS R$ 29,90 <b>(50% OFF 🔥)</b>\nPagamento único. O bagulho é teu pra sempre!\n\n` +
       `🔥 GARANTE LOGO O TEU ACESSO 🔥`;
 
-    try { await bot.sendVideo(chatId, VIDEO_START, { caption: textoLegenda, parse_mode: "HTML", reply_markup: botoesPlanos }); } 
-    catch (e) { await bot.sendMessage(chatId, textoLegenda, { parse_mode: "HTML", reply_markup: botoesPlanos }); }
-    setTimeout(async () => { await bot.sendMessage(chatId, `⚠️ <b>Papo reto:</b> Assinantes tem um comando exclusivo (/resgatar) pra pegar o link de novo caso dê caô e o grupo caia.`, { parse_mode: 'HTML' }); }, 1000);
+    try {
+      await bot.sendPhoto(chatId, FOTO_START, { caption: textoLegenda, parse_mode: "HTML", reply_markup: botoesPlanos });
+    } catch (e) {
+      await bot.sendMessage(chatId, textoLegenda, { parse_mode: "HTML", reply_markup: botoesPlanos });
+    }
+
+    setTimeout(async () => { 
+      await bot.sendMessage(chatId, `⚠️ <b>Papo reto:</b> Assinantes tem um comando exclusivo (/resgatar) pra pegar o link de novo caso dê caô e o grupo caia.`, { parse_mode: 'HTML' }); 
+    }, 1000);
   });
 
   bot.onText(/\/resgatar/, async (msg) => {
@@ -259,17 +257,6 @@ function iniciarMlkBrasileiro() {
       }
     }
   });
-
-  setInterval(() => {
-    const agora = Date.now();
-    for (const [chatId, dados] of pagamentosPendentes.entries()) {
-      const min = (agora - dados.timestamp) / 60000;
-      if (min >= 5 && dados.etapa === 0) { dados.etapa = 1; bot.sendMessage(chatId, `⏳ Coé! Vi que tu gerou o PIX mas não finalizou.\n\nO acesso é imediato, só falta o pagamento pra entrar na resenha! 🔥 Clica aí e garante antes que tu perca a vaga.`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); } 
-      else if (min >= 15 && dados.etapa === 1) { dados.etapa = 2; bot.sendMessage(chatId, `👀 Tá moscando?\n\nO grupo tá pegando fogo agora mermo! Copia o PIX ali em cima ou gera de novo. O bagulho é louco e sai na hora. 😈`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); }
-      else if (min >= 30 && dados.etapa === 2) { dados.etapa = 3; bot.sendMessage(chatId, `⚠️ VISÃO: Teu código PIX vai expirar, parceiro!\n\nAinda dá tempo de garantir teu acesso. Finaliza o pagamento agora ou gera um novo código:`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); }
-      else if (min >= 60 && dados.etapa === 3) { bot.sendMessage(chatId, `🚨 ÚLTIMA CHANCE!\n\nTeu pedido rodou e a vaga vai pro próximo cria da fila 👇`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); pagamentosPendentes.delete(chatId); }
-    }
-  }, 60000); 
 
   bot.on('message', (msg) => {
     let fileId = null;
@@ -373,26 +360,17 @@ function iniciarBielSalles() {
     } catch (e) {}
   });
 
-  setInterval(async () => {
-    const pendentes = pagamentos.filter(p => p.status === 'pending');
-    for (const cliente of pendentes) {
-      const min = (Date.now() - cliente.createdAt) / 60000;
-      if (min >= 5 && cliente.etapaFunil === 0) {
-        bot.sendMessage(cliente.chatId, `Ei… 👀 Você gerou o PIX e sumiu.\n\nTá com medo de ver o quanto eu fico gostoso quando tô gozando? 😈 O acesso é na hora.\n\nFinaliza agora e vem me ver de verdade 🤤💦`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(() => {});
-        cliente.etapaFunil = 1;
-      }
-    }
-  }, 15000);
+  bot.on('message', (msg) => {
+    let fileId = null;
+    if (msg.photo) fileId = msg.photo[msg.photo.length - 1].file_id; 
+    else if (msg.video) fileId = msg.video.file_id;
+    else if (msg.document) fileId = msg.document.file_id;
+    else if (msg.animation) fileId = msg.animation.file_id;
 
-  setInterval(async () => {
-    const agora = Date.now();
-    for (let i = assinantes.length - 1; i >= 0; i--) {
-      const a = assinantes[i];
-      if (agora > a.validade) {
-        try { await bot.banChatMember(CHANNEL_ID, a.chatId); await bot.unbanChatMember(CHANNEL_ID, a.chatId); await bot.sendMessage(a.chatId, `⚠️ <b>Seu tempo de acesso expirou!</b>\n\nEspero que tenha gozado bastante! 😈 Para renovar, digite /start e escolha um novo plano.`, { parse_mode: 'HTML' }); assinantes.splice(i, 1); } catch (e) {}
-      }
+    if (fileId && !msg.text?.startsWith('/start')) {
+      bot.sendMessage(msg.chat.id, `📸 Copia o ID abaixo pra botar no código:\n\n\`${fileId}\``, { parse_mode: "Markdown" });
     }
-  }, 3600000);
+  });
 }
 
 // ==========================================
@@ -484,26 +462,17 @@ function iniciarAryanAlmeida() {
     } catch (e) {}
   });
 
-  setInterval(async () => {
-    const pendentes = pagamentos.filter(p => p.status === 'pending');
-    for (const cliente of pendentes) {
-      const min = (Date.now() - cliente.createdAt) / 60000;
-      if (min >= 5 && cliente.etapaFunil === 0) {
-        bot.sendMessage(cliente.chatId, `Ei… 👀 Você gerou o PIX e sumiu.\n\nTá com medo da visão? 😈 O acesso é na hora.\n\nFinaliza agora e vem me ver de verdade 🤤💦`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(() => {});
-        cliente.etapaFunil = 1;
-      }
-    }
-  }, 15000);
+  bot.on('message', (msg) => {
+    let fileId = null;
+    if (msg.photo) fileId = msg.photo[msg.photo.length - 1].file_id; 
+    else if (msg.video) fileId = msg.video.file_id;
+    else if (msg.document) fileId = msg.document.file_id;
+    else if (msg.animation) fileId = msg.animation.file_id;
 
-  setInterval(async () => {
-    const agora = Date.now();
-    for (let i = assinantes.length - 1; i >= 0; i--) {
-      const a = assinantes[i];
-      if (agora > a.validade) {
-        try { await bot.banChatMember(CHANNEL_ID, a.chatId); await bot.unbanChatMember(CHANNEL_ID, a.chatId); await bot.sendMessage(a.chatId, `⚠️ <b>Seu tempo de acesso expirou!</b>\n\nEspero que tenha aproveitado! 😈 Para renovar, digite /start e escolha um novo plano.`, { parse_mode: 'HTML' }); assinantes.splice(i, 1); } catch (e) {}
-      }
+    if (fileId && !msg.text?.startsWith('/start')) {
+      bot.sendMessage(msg.chat.id, `📸 Copia o ID abaixo pra botar no código:\n\n\`${fileId}\``, { parse_mode: "Markdown" });
     }
-  }, 3600000);
+  });
 }
 
 // ==========================================
