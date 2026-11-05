@@ -13,7 +13,7 @@ const WIINPAY_API = "https://api-v2.wiinpay.com.br";
 
 function getPublicUrl() {
   const url = process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '';
-  return String(url).replace(/\/\$/, '');
+  return String(url).replace(/\/$/, '');
 }
 
 app.get('/', (req, res) => {
@@ -80,14 +80,30 @@ function iniciarAcervoBrasil() {
   const VIDEO_START = 'BAACAgEAAxkBAAMDasfXsVxDTJuo2F6Dz6BUJaPu6XAAAs0JAAJkbzlGBVE4HlctfSA9BA'; 
   const botoesPlanos = {
     inline_keyboard: [
-      [{ text: "😈 PLANO MENSAL (R\$ 14,90)", callback_data: "plano_mensal" }],
-      [{ text: "🔥 VITALÍCIO - R\$ 29,90", callback_data: "plano_vitalicio" }]
+      [{ text: "🌍 Copy PayPal e-mail ($15)", url: "mailto:acervobr55@outlook.com?subject=VIP%20Access%20PayPal&body=Hello,%20I%20have%20sent%20the%20$15%20USD%20via%20PayPal.%20Here%20is%20my%20proof:" }],
+      [{ text: "😈 PLANO MENSAL (R$ 14,90)", callback_data: "plano_mensal" }],
+      [{ text: "🔥 VITALÍCIO - R$ 29,90", callback_data: "plano_vitalicio" }]
     ]
   };
 
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
-    const textoLegenda = "🇧🇷 <b>ACERVO BRASIL +18</b> 🇧🇷\n\nAqui você encontra as melhores chamadinhas, lives e vazados com atualização todo dia.\n\nNada de enrolação, o link é gerado automaticamente após o pagamento.\n\nEscolhe seu acesso:\n\n😈 <b>PLANO MENSAL</b>\n👉 30 dias de acesso — R\$ 14,90\n\n🔥 <b>Pagamento único. Acesso pra sempre.</b>\n👉 De <s>R\$ 60,00</s> por apenas R\$ 29,90\n\n⚠️ O acesso Vitalício está disponível até <b>" + getDataAmanha() + "</b>, são poucas vagas.\n\n🔒 Garante seu acesso agora 👇";
+    const textoLegenda = "🇧🇷 <b>ACERVO BRASIL +18</b> 🇧🇷\n\n" +
+      "🌍 <b>International payment via PayPal ($15 USD)</b>\n" +
+      "👉🏻 <code>acervobr55@outlook.com</code>\n\n" +
+      "⚠️ <i>Those paying via PayPal should send proof of payment to:</i>\n" +
+      "👉🏻 @hiagokff\n\n" +
+      "-------------------------------------------\n\n" +
+      "Aqui você encontra as melhores chamadinhas, lives e vazados com atualização todo dia.\n\n" +
+      "Nada de enrolação, o link é gerado automaticamente após o pagamento via Pix.\n\n" +
+      "Escolhe seu acesso:\n\n" +
+      "😈 <b>PLANO MENSAL</b>\n" +
+      "👉 30 dias de acesso — R$ 14,90\n\n" +
+      "🔥 <b>Pagamento único. Acesso pra sempre.</b>\n" +
+      "👉 De <s>R$ 60,00</s> por apenas R$ 29,90\n\n" +
+      "⚠️ O acesso Vitalício está disponível até <b>" + getDataAmanha() + "</b>, são poucas vagas.\n\n" +
+      "🔒 Garante seu acesso agora 👇";
+
     try { await bot.sendVideo(chatId, VIDEO_START, { caption: textoLegenda, parse_mode: "HTML", reply_markup: botoesPlanos }); } 
     catch (e) { await bot.sendMessage(chatId, textoLegenda, { parse_mode: "HTML", reply_markup: botoesPlanos }); }
   });
@@ -141,12 +157,24 @@ function iniciarAcervoBrasil() {
       else if (min >= 60 && dados.etapa === 3) { bot.sendMessage(chatId, `🚨 ÚLTIMA CHAMADA!\n\nSeu pedido foi cancelado. Se ainda quiser colar com a gente, gera um novo pagamento aí embaixo 👇`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); pagamentosPendentes.delete(chatId); }
     }
   }, 60000); 
+
+  bot.on('message', (msg) => {
+    let fileId = null;
+    if (msg.photo) fileId = msg.photo[msg.photo.length - 1].file_id; 
+    else if (msg.video) fileId = msg.video.file_id;
+    else if (msg.document) fileId = msg.document.file_id;
+    else if (msg.animation) fileId = msg.animation.file_id;
+
+    if (fileId && !msg.text?.startsWith('/start')) {
+      bot.sendMessage(msg.chat.id, `📸 Copia o ID abaixo pra botar no código:\n\n\`${fileId}\``, { parse_mode: "Markdown" });
+    }
+  });
 }
 
 // ==========================================
-// 4. MÓDULO 2: TRIBO DOS NOVINHOS
+// 4. MÓDULO 2: MLK BRASILEIRO
 // ==========================================
-function iniciarTriboDosNovinhos() {
+function iniciarMlkBrasileiro() {
   if (!process.env.TOKEN_TRIBO) return console.log("⚠️ TOKEN_TRIBO ausente.");
   
   const bot = new TelegramBot(process.env.TOKEN_TRIBO, { polling: true });
@@ -158,14 +186,26 @@ function iniciarTriboDosNovinhos() {
   const VIDEO_START = 'BAACAgEAAxkBAAIBMmq7LZR5l-cOPweRnG1opIa527oQAALuCAACrkLhRfLxICCwqAVBPQQ'; 
   const botoesPlanos = {
     inline_keyboard: [
-      [{ text: "🥉 MENSAL (R\$ 14,90)", callback_data: "plano_mensal" }],
-      [{ text: "💎 VITALÍCIO - R\$ 29,90 🔥", callback_data: "plano_vitalicio" }]
+      [{ text: "🌍 Copy PayPal e-mail ($15)", url: "mailto:acervobr55@outlook.com?subject=VIP%20Access%20PayPal&body=Hello,%20I%20have%20sent%20the%20$15%20USD%20via%20PayPal.%20Here%20is%20my%20proof:" }],
+      [{ text: "🥉 MENSAL (R$ 14,90)", callback_data: "plano_mensal" }],
+      [{ text: "💎 VITALÍCIO - R$ 29,90 🔥", callback_data: "plano_vitalicio" }]
     ]
   };
 
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
-    const textoLegenda = `<b>🔥 TRIBO DOS NOVINHOS 🔥</b>\n\nPapo reto, os conteúdos mais brabos, CHAMADINHAS, LIVES, VAZADINHOS que tu não acha em lugar nenhum, com atualizações diarias.\n\nEscolhe teu plano aí embaixo:\n\n🥉 <b>PLANO MENSAL</b>\n👉 Acesso por 30 dias - R$ 14,90\n\n💎 <b>PLANO VITALÍCIO</b> (OFERTA RELÂMPAGO)\n👉 DE <s>R$ 60,00</s> POR APENAS R$ 29,90 <b>(50% OFF 🔥)</b>\nPagamento único. O bagulho é teu pra sempre!\n\n🔥 GARANTE LOGO O TEU ACESSO 🔥`;
+    const textoLegenda = `<b>🔥 MLK BRASILEIRO 🔥</b>\n\n` +
+      `🌍 <b>International payment via PayPal ($15 USD)</b>\n` +
+      `👉🏻 <code>acervobr55@outlook.com</code>\n\n` +
+      `⚠️ <i>Those paying via PayPal should send proof of payment to:</i>\n` +
+      `👉🏻 @hiagokff\n\n` +
+      `-------------------------------------------\n\n` +
+      `Papo reto, os conteúdos mais brabos, CHAMADINHAS, LIVES, VAZADINHOS que tu não acha em lugar nenhum, com atualizações diarias.\n\n` +
+      `Escolhe teu plano aí embaixo:\n\n` +
+      `🥉 <b>PLANO MENSAL</b>\n👉 Acesso por 30 dias - R$ 14,90\n\n` +
+      `💎 <b>PLANO VITALÍCIO</b> (OFERTA RELÂMPAGO)\n👉 DE <s>R$ 60,00</s> POR APENAS R$ 29,90 <b>(50% OFF 🔥)</b>\nPagamento único. O bagulho é teu pra sempre!\n\n` +
+      `🔥 GARANTE LOGO O TEU ACESSO 🔥`;
+
     try { await bot.sendVideo(chatId, VIDEO_START, { caption: textoLegenda, parse_mode: "HTML", reply_markup: botoesPlanos }); } 
     catch (e) { await bot.sendMessage(chatId, textoLegenda, { parse_mode: "HTML", reply_markup: botoesPlanos }); }
     setTimeout(async () => { await bot.sendMessage(chatId, `⚠️ <b>Papo reto:</b> Assinantes tem um comando exclusivo (/resgatar) pra pegar o link de novo caso dê caô e o grupo caia.`, { parse_mode: 'HTML' }); }, 1000);
@@ -191,7 +231,7 @@ function iniciarTriboDosNovinhos() {
       const URL_WEBHOOK = `${getPublicUrl()}/webhook/tribo`;
       const res = await fetch(`${WIINPAY_API}/payment/create`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: WIINPAY_TOKEN, value: valor, name: "Cliente Tribo", email: "vip@tribonovinhos.com", description: `Plano VIP ${plano}`, metadata: { chatId: String(chatId), plano: plano }, webhook_url: URL_WEBHOOK })
+        body: JSON.stringify({ api_key: WIINPAY_TOKEN, value: valor, name: "Cliente Mlk Brasileiro", email: "vip@mlkbrasileiro.com", description: `Plano VIP ${plano}`, metadata: { chatId: String(chatId), plano: plano }, webhook_url: URL_WEBHOOK })
       });
       const json = await res.json();
       bot.deleteMessage(chatId, msgL.message_id).catch(() => {});
@@ -230,6 +270,18 @@ function iniciarTriboDosNovinhos() {
       else if (min >= 60 && dados.etapa === 3) { bot.sendMessage(chatId, `🚨 ÚLTIMA CHANCE!\n\nTeu pedido rodou e a vaga vai pro próximo cria da fila 👇`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); pagamentosPendentes.delete(chatId); }
     }
   }, 60000); 
+
+  bot.on('message', (msg) => {
+    let fileId = null;
+    if (msg.photo) fileId = msg.photo[msg.photo.length - 1].file_id; 
+    else if (msg.video) fileId = msg.video.file_id;
+    else if (msg.document) fileId = msg.document.file_id;
+    else if (msg.animation) fileId = msg.animation.file_id;
+
+    if (fileId && !msg.text?.startsWith('/start')) {
+      bot.sendMessage(msg.chat.id, `📸 Copia o ID abaixo pra botar no código:\n\n\`${fileId}\``, { parse_mode: "Markdown" });
+    }
+  });
 }
 
 // ==========================================
@@ -246,9 +298,9 @@ function iniciarBielSalles() {
 
   const botoesPlanos = {
     inline_keyboard: [
-      [{ text: "R\$ 16,90 / Acesso VIP (24h) - 7 Dias", callback_data: "plano_7" }],
-      [{ text: "R\$ 34,90 / Acesso VIP 25% OFF - 30 Dias", callback_data: "plano_30" }],
-      [{ text: "R\$ 69,90 / Acesso VIP (24h) - Vitalício", callback_data: "plano_vitalicio" }]
+      [{ text: "R$ 16,90 / Acesso VIP (24h) - 7 Dias", callback_data: "plano_7" }],
+      [{ text: "R$ 34,90 / Acesso VIP 25% OFF - 30 Dias", callback_data: "plano_30" }],
+      [{ text: "R$ 69,90 / Acesso VIP (24h) - Vitalício", callback_data: "plano_vitalicio" }]
     ]
   };
 
@@ -290,7 +342,7 @@ function iniciarBielSalles() {
       const qrcode = extrairQrCode(json); const txid = extrairPaymentId(json);
       if (!qrcode || !txid) throw new Error("Sem QR Code");
 
-      const texto = `💳 PIX GERADO COM SUCESSO\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n📋 Código PIX (Copia e Cola):\n\n\`\${qrcode}\`\n\n📌 Toque no código acima para copiar.\n\n⏳ O acesso é liberado automaticamente após o pagamento.`;
+      const texto = `💳 PIX GERADO COM SUCESSO\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n📋 Código PIX (Copia e Cola):\n\n\`${qrcode}\`\n\n📌 Toque no código acima para copiar.\n\n⏳ O acesso é liberado automaticamente após o pagamento.`;
       const mensagemPix = await bot.sendMessage(chatId, texto, { parse_mode: "Markdown" });
       pagamentos.push({ txid: String(txid), chatId: String(chatId), mensagemId: String(mensagemPix.message_id), status: "pending", createdAt: Date.now(), etapaFunil: 0, plano: tipoPlano });
     } catch (e) { bot.sendMessage(chatId, "⚠️ Sistema indisponível."); }
@@ -357,15 +409,14 @@ function iniciarAryanAlmeida() {
 
   const botoesPlanos = {
     inline_keyboard: [
-      [{ text: "R\$ 16,90 / Acesso VIP (24h) - 7 Dias", callback_data: "plano_7" }],
-      [{ text: "R\$ 34,90 / Acesso VIP 25% OFF - 30 Dias", callback_data: "plano_30" }],
-      [{ text: "R\$ 69,90 / Acesso VIP (24h) - Vitalício", callback_data: "plano_vitalicio" }]
+      [{ text: "R$ 16,90 / Acesso VIP (24h) - 7 Dias", callback_data: "plano_7" }],
+      [{ text: "R$ 34,90 / Acesso VIP 25% OFF - 30 Dias", callback_data: "plano_30" }],
+      [{ text: "R$ 69,90 / Acesso VIP (24h) - Vitalício", callback_data: "plano_vitalicio" }]
     ]
   };
 
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
-    // Substitua a mídia abaixo quando tiver o vídeo do Aryan
     const MIDIA_ARYAN = 'BAACAgEAAxkBAAMFapIc9eVh_YzY9LXtb2LhovAJ89MAAqwIAAK7u5FEiAYu93eD9Kk9BA'; 
     const texto1 = `E aí, curtindo a visão? 😈\nQue bom que você apertou em Iniciar… Aqui não tem enrolação.\n\nSó conteúdo quente, sem censura e feito pra te deixar no grau 🔥\n\n🍑 Fotos exclusivas\n🎥 Vídeos sem corte\n💦 Conteúdos que não saem em lugar nenhum\n\nPra entrar no meu grupo VIP é só escolher o plano e pagar o PIX:`;
     const texto2 = `Assim que o PIX cair, o bot te libera na hora ⚡\nAcesso imediato, sem enrolação.\nTô te esperando 😈`;
@@ -402,7 +453,7 @@ function iniciarAryanAlmeida() {
       const qrcode = extrairQrCode(json); const txid = extrairPaymentId(json);
       if (!qrcode || !txid) throw new Error("Sem QR Code");
 
-      const texto = `💳 PIX GERADO COM SUCESSO\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n📋 Código PIX (Copia e Cola):\n\n\`\${qrcode}\`\n\n📌 Toque no código acima para copiar.\n\n⏳ O acesso é liberado automaticamente após o pagamento.`;
+      const texto = `💳 PIX GERADO COM SUCESSO\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n📋 Código PIX (Copia e Cola):\n\n\`${qrcode}\`\n\n📌 Toque no código acima para copiar.\n\n⏳ O acesso é liberado automaticamente após o pagamento.`;
       const mensagemPix = await bot.sendMessage(chatId, texto, { parse_mode: "Markdown" });
       pagamentos.push({ txid: String(txid), chatId: String(chatId), mensagemId: String(mensagemPix.message_id), status: "pending", createdAt: Date.now(), etapaFunil: 0, plano: tipoPlano });
     } catch (e) { bot.sendMessage(chatId, "⚠️ Sistema indisponível."); }
@@ -458,8 +509,7 @@ function iniciarAryanAlmeida() {
 // ==========================================
 // 7. INICIALIZADOR GLOBAL
 // ==========================================
-// Comente as linhas abaixo caso queira desligar algum bot temporariamente
 iniciarAcervoBrasil();
-iniciarTriboDosNovinhos();
+iniciarMlkBrasileiro();
 iniciarBielSalles();
 iniciarAryanAlmeida();
