@@ -183,7 +183,7 @@ function iniciarMlkBrasileiro() {
   const vitalicios = []; 
   const pagamentosPendentes = new Map();
 
-  const VIDEO_START = 'BAACAgEAAxkBAAIBMmq7LZR5l-cOPweRnG1opIa527oQAALuCAACrkLhRfLxICCwqAVBPQQ'; 
+  const VIDEO_START = 'AgACAgEAAxkBAAMKauyYIIuALKzh6EyonG1XDDHExk8AArYMaxtC6mhHNVO84I4U0FIBAAMCAAN5AAM9BA'; 
   const botoesPlanos = {
     inline_keyboard: [
       [{ text: "🌍 Copy PayPal e-mail ($15)", url: "mailto:acervobr55@outlook.com?subject=VIP%20Access%20PayPal&body=Hello,%20I%20have%20sent%20the%20$15%20USD%20via%20PayPal.%20Here%20is%20my%20proof:" }],
