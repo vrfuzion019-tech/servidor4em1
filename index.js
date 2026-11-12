@@ -366,7 +366,7 @@ function iniciarAryanAlmeida() {
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     // Substitua a mídia abaixo quando tiver o vídeo do Aryan
-    const MIDIA_ARYAN = 'BAACAgEAAxkBAAMFapIc9eVh_YzY9LXtb2LhovAJ89MAAqwIAAK7u5FEiAYu93eD9Kk9BA'; 
+    const MIDIA_ARYAN = ''; 
     const texto1 = `E aí, curtindo a visão? 😈\nQue bom que você apertou em Iniciar… Aqui não tem enrolação.\n\nSó conteúdo quente, sem censura e feito pra te deixar no grau 🔥\n\n🍑 Fotos exclusivas\n🎥 Vídeos sem corte\n💦 Conteúdos que não saem em lugar nenhum\n\nPra entrar no meu grupo VIP é só escolher o plano e pagar o PIX:`;
     const texto2 = `Assim que o PIX cair, o bot te libera na hora ⚡\nAcesso imediato, sem enrolação.\nTô te esperando 😈`;
 
@@ -395,7 +395,7 @@ function iniciarAryanAlmeida() {
       const URL_WEBHOOK = `${getPublicUrl()}/webhook/aryan`;
       const response = await fetch(`${WIINPAY_API}/payment/create`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: WIINPAY_KEY, value: valor, name: "Cliente VIP Aryan", email: "vip@aryanalmeida.com", description: nomePlano, metadata: { chatId: String(chatId), plano: tipoPlano }, webhook_url: URL_WEBHOOK })
+        body: JSON.stringify({ api_key: WIINPAY_KEY, value: valor, name: "Cliente VIP Nicolas", email: "vip@nicolas.com", description: nomePlano, metadata: { chatId: String(chatId), plano: tipoPlano }, webhook_url: URL_WEBHOOK })
       });
       const json = await response.json();
       bot.deleteMessage(chatId, msgLoading.message_id).catch(() => {});
