@@ -246,9 +246,9 @@ function iniciarBielSalles() {
 
   const botoesPlanos = {
     inline_keyboard: [
-      [{ text: "R\$ 16,90 / Acesso VIP (24h) - 7 Dias", callback_data: "plano_7" }],
-      [{ text: "R\$ 34,90 / Acesso VIP 25% OFF - 30 Dias", callback_data: "plano_30" }],
-      [{ text: "R\$ 69,90 / Acesso VIP (24h) - Vitalício", callback_data: "plano_vitalicio" }]
+      [{ text: "R\$ 15,00 / Acesso VIP (24h) - 7 Dias", callback_data: "plano_7" }],
+      [{ text: "R\$ 24,90 / Acesso VIP 25% OFF - 30 Dias", callback_data: "plano_30" }],
+      [{ text: "R\$ 49,90 / Acesso VIP (24h) - Vitalício", callback_data: "plano_vitalicio" }]
     ]
   };
 
@@ -272,9 +272,9 @@ function iniciarBielSalles() {
     bot.answerCallbackQuery(query.id).catch(() => {});
 
     let valor = 0; let tipoPlano = ""; let nomePlano = "";
-    if (query.data === "plano_7") { valor = 16.90; tipoPlano = "7_dias"; nomePlano = "Acesso VIP 7 Dias"; }
-    else if (query.data === "plano_30") { valor = 34.90; tipoPlano = "30_dias"; nomePlano = "Acesso VIP 30 Dias"; }
-    else if (query.data === "plano_vitalicio") { valor = 69.90; tipoPlano = "vitalicio"; nomePlano = "Acesso VIP Vitalicio"; }
+    if (query.data === "plano_7") { valor = 15.00; tipoPlano = "7_dias"; nomePlano = "Acesso VIP 7 Dias"; }
+    else if (query.data === "plano_30") { valor = 24.90; tipoPlano = "30_dias"; nomePlano = "Acesso VIP 30 Dias"; }
+    else if (query.data === "plano_vitalicio") { valor = 49.90; tipoPlano = "vitalicio"; nomePlano = "Acesso VIP Vitalicio"; }
 
     if (valor <= 0) return;
     const msgLoading = await bot.sendMessage(chatId, `⏳ Aguarde, gerando seu PIX seguro e anônimo...`);
@@ -365,8 +365,10 @@ function iniciarAryanAlmeida() {
 
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
-   const MIDIA_ARYAN = 'BAACAgEAAxkBAAMFapIc9eVh_YzY9LXtb2LhovAJ89MAAqwIAAK7u5FEiAYu93eD9Kk9BA';
-    const texto1 = `Oi minha vida 🫣🫶🏻\n\nTo com uma super promoção para você ver meus conteúdos e se satisfazer comigo daquele jeitinho bem gostoso sabe 🤤 aproveita essa promoção abaixo e vamos gozar bem gostoso agora 🔞👀😈`;
+    // Substitua a mídia abaixo quando tiver o vídeo do Aryan
+    const MIDIA_ARYAN = 'BAACAgEAAxkBAAMFapIc9eVh_YzY9LXtb2LhovAJ89MAAqwIAAK7u5FEiAYu93eD9Kk9BA'; 
+    const texto1 = `E aí, curtindo a visão? 😈\nQue bom que você apertou em Iniciar… Aqui não tem enrolação.\n\nSó conteúdo quente, sem censura e feito pra te deixar no grau 🔥\n\n🍑 Fotos exclusivas\n🎥 Vídeos sem corte\n💦 Conteúdos que não saem em lugar nenhum\n\nPra entrar no meu grupo VIP é só escolher o plano e pagar o PIX:`;
+    const texto2 = `Assim que o PIX cair, o bot te libera na hora ⚡\nAcesso imediato, sem enrolação.\nTô te esperando 😈`;
 
     try {
       try { await bot.sendVideo(chatId, MIDIA_ARYAN); } catch (e) { await bot.sendPhoto(chatId, MIDIA_ARYAN); }
@@ -393,7 +395,7 @@ function iniciarAryanAlmeida() {
       const URL_WEBHOOK = `${getPublicUrl()}/webhook/aryan`;
       const response = await fetch(`${WIINPAY_API}/payment/create`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: WIINPAY_KEY, value: valor, name: "Cliente VIP Nicolas", email: "vip@nicolas.com", description: nomePlano, metadata: { chatId: String(chatId), plano: tipoPlano }, webhook_url: URL_WEBHOOK })
+        body: JSON.stringify({ api_key: WIINPAY_KEY, value: valor, name: "Cliente VIP Aryan", email: "vip@aryanalmeida.com", description: nomePlano, metadata: { chatId: String(chatId), plano: tipoPlano }, webhook_url: URL_WEBHOOK })
       });
       const json = await response.json();
       bot.deleteMessage(chatId, msgLoading.message_id).catch(() => {});
