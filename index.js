@@ -33,7 +33,22 @@ function gerarIdempotencyKey(prefix = 'pix') {
 
 async function criarPagamentoPixMP({ accessToken, valor, nome, email, descricao, metadata, notificationUrl }) {
   if (!accessToken) {
-    throw new Error("Access Token do Mercado Pago não configurado.");
+    throw new Error("Access Token do Mercado Pago não configurado (MP_ACCESS_TOKEN).");
+  }
+
+  const bodyPayload = {
+    transaction_amount: Number(Number(valor).toFixed(2)),
+    description: descricao,
+    payment_method_id: "pix",
+    payer: {
+      email: email || "cliente@vip.com",
+      first_name: nome || "Cliente"
+    },
+    metadata: metadata || {}
+  };
+
+  if (notificationUrl && notificationUrl.startsWith("https://")) {
+    bodyPayload.notification_url = notificationUrl;
   }
 
   const res = await fetch(`${MP_API}/v1/payments`, {
@@ -43,22 +58,12 @@ async function criarPagamentoPixMP({ accessToken, valor, nome, email, descricao,
       'Authorization': `Bearer ${accessToken}`,
       'X-Idempotency-Key': gerarIdempotencyKey(metadata?.chatId || 'vip')
     },
-    body: JSON.stringify({
-      transaction_amount: Number(Number(valor).toFixed(2)),
-      description: descricao,
-      payment_method_id: "pix",
-      payer: {
-        email: email || "cliente@vip.com",
-        first_name: nome || "Cliente"
-      },
-      metadata: metadata || {},
-      notification_url: notificationUrl
-    })
+    body: JSON.stringify(bodyPayload)
   });
 
   const data = await res.json();
   if (!res.ok) {
-    console.error("Erro ao criar Pix no Mercado Pago:", data);
+    console.error("❌ Erro ao criar Pix no Mercado Pago:", JSON.stringify(data));
     throw new Error(data?.message || "Erro ao criar pagamento no Mercado Pago");
   }
 
@@ -69,11 +74,15 @@ async function criarPagamentoPixMP({ accessToken, valor, nome, email, descricao,
 
   const paymentId = data?.id || null;
 
+  console.log(`✅ Pix MP criado | paymentId: ${paymentId} | valor: ${valor} | chatId: ${metadata?.chatId}`);
   return { paymentId, qrCode, raw: data };
 }
 
 async function buscarPagamentoMP(accessToken, paymentId) {
-  if (!accessToken || !paymentId) return null;
+  if (!accessToken || !paymentId) {
+    console.error("❌ Token ou paymentId ausente ao consultar pagamento MP.");
+    return null;
+  }
 
   const res = await fetch(`${MP_API}/v1/payments/${encodeURIComponent(String(paymentId))}`, {
     method: 'GET',
@@ -82,12 +91,13 @@ async function buscarPagamentoMP(accessToken, paymentId) {
     }
   });
 
+  const data = await res.json().catch(() => null);
   if (!res.ok) {
-    console.error(`Falha ao consultar pagamento ${paymentId} no Mercado Pago:`, res.status);
+    console.error(`❌ Falha ao consultar pagamento ${paymentId} no Mercado Pago (HTTP ${res.status}):`, JSON.stringify(data));
     return null;
   }
 
-  return res.json();
+  return data;
 }
 
 function extrairPaymentIdWebhook(req) {
@@ -95,7 +105,7 @@ function extrairPaymentIdWebhook(req) {
     req.body?.data?.id ||
     req.query?.['data.id'] ||
     req.query?.id ||
-    (req.body?.resource && /^\d+$/.test(String(req.body.resource)) ? req.body.resource : null) ||
+    (req.body?.resource && /^\d+$/.test(String(req.body.resource)) ? String(req.body.resource) : null) ||
     null
   );
 }
@@ -115,6 +125,30 @@ function getDataAmanha() {
   const mes = String(amanha.getMonth() + 1).padStart(2, '0');
   const ano = amanha.getFullYear();
   return dia + '/' + mes + '/' + ano;
+}
+
+async function entregarLinkCanal({ bot, channelId, chatId, mensagemSucesso, onErro }) {
+  if (!channelId) {
+    const errMsg = "CHANNEL_ID não configurado no ambiente para entrega do link.";
+    console.error("❌", errMsg);
+    if (onErro) await onErro(errMsg);
+    return false;
+  }
+
+  try {
+    const invite = await bot.createChatInviteLink(channelId, { member_limit: 1 });
+    const textoFinal = typeof mensagemSucesso === 'function'
+      ? mensagemSucesso(invite.invite_link)
+      : `${mensagemSucesso}\n\n${invite.invite_link}`;
+
+    await bot.sendMessage(chatId, textoFinal, { parse_mode: 'HTML' });
+    console.log(`🎉 Link enviado com sucesso para chatId ${chatId} no canal ${channelId}`);
+    return true;
+  } catch (err) {
+    console.error(`❌ Erro ao gerar/enviar link do canal ${channelId} para chatId ${chatId}:`, err?.message || err);
+    if (onErro) await onErro(err);
+    return false;
+  }
 }
 
 // ==========================================
@@ -185,30 +219,39 @@ function iniciarAcervoBrasil() {
       if (topic && topic !== 'payment') return;
 
       const paymentId = extrairPaymentIdWebhook(req);
+      console.log(`📩 [WEBHOOK ACERVO] recebido | topic: ${topic || '-'} | paymentId: ${paymentId}`);
       if (!paymentId) return;
 
       const pagamento = await buscarPagamentoMP(MP_TOKEN, paymentId);
+      console.log(`🔎 [WEBHOOK ACERVO] pagamento ${paymentId} | status: ${pagamento?.status}`);
       if (!pagamento || pagamento.status !== 'approved') return;
 
       const chave = String(paymentId);
       if (processados.has(chave)) return;
-      processados.add(chave);
 
       const meta = extrairMetadata(pagamento);
-      const chatId = meta.chatId ? String(meta.chatId) : null;
+      const chatId = meta.chatId || meta.chat_id ? String(meta.chatId || meta.chat_id) : null;
       const plano = meta.plano;
 
-      if (chatId) {
-        pagamentosPendentes.delete(chatId);
-        try {
-          const invite = await bot.createChatInviteLink(CHANNEL_ID, { member_limit: 1 });
-          let texto = plano === 'vitalicio'
-            ? "🎉 <b>PAGAMENTO APROVADO!</b>\n\nLink do Grupo VIP: " + invite.invite_link + "\n\n⚠️ <b>Aviso:</b> Você é Vitalício! Acesso garantido pra sempre."
-            : "🎉 <b>PAGAMENTO APROVADO!</b>\n\nLink do Grupo VIP (30 dias): " + invite.invite_link;
-          await bot.sendMessage(chatId, texto, { parse_mode: 'HTML' });
-        } catch (e) {}
+      if (!chatId) {
+        console.error(`❌ [WEBHOOK ACERVO] chatId ausente no metadata do pagamento ${paymentId}`);
+        return;
       }
-    } catch (e) {}
+
+      pagamentosPendentes.delete(chatId);
+      const entregue = await entregarLinkCanal({
+        bot,
+        channelId: CHANNEL_ID,
+        chatId,
+        mensagemSucesso: (link) => plano === 'vitalicio'
+          ? `🎉 <b>PAGAMENTO APROVADO!</b>\n\nLink do Grupo VIP: ${link}\n\n⚠️ <b>Aviso:</b> Você é Vitalício! Acesso garantido pra sempre.`
+          : `🎉 <b>PAGAMENTO APROVADO!</b>\n\nLink do Grupo VIP (30 dias): ${link}`
+      });
+
+      if (entregue) processados.add(chave);
+    } catch (e) {
+      console.error("❌ [WEBHOOK ACERVO] erro inesperado:", e);
+    }
   });
 
   setInterval(() => {
@@ -303,31 +346,42 @@ function iniciarMlkBrasileiro() {
       if (topic && topic !== 'payment') return;
 
       const paymentId = extrairPaymentIdWebhook(req);
+      console.log(`📩 [WEBHOOK TRIBO] recebido | topic: ${topic || '-'} | paymentId: ${paymentId}`);
       if (!paymentId) return;
 
       const pagamento = await buscarPagamentoMP(MP_TOKEN, paymentId);
+      console.log(`🔎 [WEBHOOK TRIBO] pagamento ${paymentId} | status: ${pagamento?.status}`);
       if (!pagamento || pagamento.status !== 'approved') return;
 
       const chave = String(paymentId);
       if (processados.has(chave)) return;
-      processados.add(chave);
 
       const meta = extrairMetadata(pagamento);
-      const chatId = meta.chatId ? String(meta.chatId) : null;
+      const chatId = meta.chatId || meta.chat_id ? String(meta.chatId || meta.chat_id) : null;
       const plano = meta.plano;
 
-      if (chatId) {
-        pagamentosPendentes.delete(chatId);
-        try {
-          const invite = await bot.createChatInviteLink(CHANNEL_ID, { member_limit: 1 });
-          const texto = plano === 'vitalicio'
-            ? `🎉 <b>PAGAMENTO APROVADO, CRIA!</b>\n\nLink do Grupo VIP: ${invite.invite_link}\n\n⚠️ <b>VISÃO:</b> Tu é Vitalício! Se der caô no grupo, digita /resgatar aqui no bot!`
-            : `🎉 <b>PAGAMENTO APROVADO, CRIA!</b>\n\nLink do Grupo VIP (30 dias): ${invite.invite_link}`;
-          await bot.sendMessage(chatId, texto, { parse_mode: 'HTML' });
-          if (plano === 'vitalicio' && !vitalicios.includes(chatId)) vitalicios.push(chatId);
-        } catch (e) {}
+      if (!chatId) {
+        console.error(`❌ [WEBHOOK TRIBO] chatId ausente no metadata do pagamento ${paymentId}`);
+        return;
       }
-    } catch (e) {}
+
+      pagamentosPendentes.delete(chatId);
+      const entregue = await entregarLinkCanal({
+        bot,
+        channelId: CHANNEL_ID,
+        chatId,
+        mensagemSucesso: (link) => plano === 'vitalicio'
+          ? `🎉 <b>PAGAMENTO APROVADO, CRIA!</b>\n\nLink do Grupo VIP: ${link}\n\n⚠️ <b>VISÃO:</b> Tu é Vitalício! Se der caô no grupo, digita /resgatar aqui no bot!`
+          : `🎉 <b>PAGAMENTO APROVADO, CRIA!</b>\n\nLink do Grupo VIP: ${link}`
+      });
+
+      if (entregue) {
+        processados.add(chave);
+        if (plano === 'vitalicio' && !vitalicios.includes(chatId)) vitalicios.push(chatId);
+      }
+    } catch (e) {
+      console.error("❌ [WEBHOOK TRIBO] erro inesperado:", e);
+    }
   });
 
   setInterval(() => {
@@ -420,33 +474,47 @@ function iniciarBielSalles() {
       if (topic && topic !== 'payment') return;
 
       const paymentId = extrairPaymentIdWebhook(req);
+      console.log(`📩 [WEBHOOK BIEL] recebido | topic: ${topic || '-'} | paymentId: ${paymentId}`);
       if (!paymentId) return;
 
       const pagamento = await buscarPagamentoMP(MP_TOKEN, paymentId);
+      console.log(`🔎 [WEBHOOK BIEL] pagamento ${paymentId} | status: ${pagamento?.status}`);
       if (!pagamento || pagamento.status !== 'approved') return;
 
       const txid = String(paymentId);
       if (processados.has(txid)) return;
-      processados.add(txid);
 
       const meta = extrairMetadata(pagamento);
       const pendente = pagamentos.find(p => String(p.txid) === txid);
-      const chatId = meta.chatId || pendente?.chatId;
+      const chatId = (meta.chatId || meta.chat_id || pendente?.chatId) ? String(meta.chatId || meta.chat_id || pendente?.chatId) : null;
       const plano = meta.plano || pendente?.plano;
       const mensagemId = pendente?.mensagemId;
 
-      if (!chatId) return;
+      if (!chatId) {
+        console.error(`❌ [WEBHOOK BIEL] chatId ausente no pagamento ${txid}`);
+        return;
+      }
+
       if (pendente) pendente.status = 'approved';
+      if (mensagemId) try { await bot.deleteMessage(chatId, mensagemId); } catch (e) {}
 
-      const invite = await bot.createChatInviteLink(CHANNEL_ID, { member_limit: 1 });
-      if (mensagemId) try { await bot.deleteMessage(String(chatId), mensagemId); } catch (e) {}
-      await bot.sendMessage(chatId, `🎉 PAGAMENTO APROVADO!\n\nSeu pagamento foi confirmado ✅\n\n🔒 Acesso liberado:\n\n${invite.invite_link}\n\n⚠️ Link único com limite de 1 uso.`);
+      const entregue = await entregarLinkCanal({
+        bot,
+        channelId: CHANNEL_ID,
+        chatId,
+        mensagemSucesso: (link) => `🎉 PAGAMENTO APROVADO!\n\nSeu pagamento foi confirmado ✅\n\n🔒 Acesso liberado:\n\n${link}\n\n⚠️ Link único com limite de 1 uso.`
+      });
 
-      const agora = Date.now(); let validade = null;
-      if (plano === '7_dias') validade = agora + (7 * 24 * 60 * 60 * 1000);
-      else if (plano === '30_dias') validade = agora + (30 * 24 * 60 * 60 * 1000);
-      if (validade) assinantes.push({ chatId: String(chatId), validade });
-    } catch (e) {}
+      if (entregue) {
+        processados.add(txid);
+        const agora = Date.now(); let validade = null;
+        if (plano === '7_dias') validade = agora + (7 * 24 * 60 * 60 * 1000);
+        else if (plano === '30_dias') validade = agora + (30 * 24 * 60 * 60 * 1000);
+        if (validade) assinantes.push({ chatId, validade });
+      }
+    } catch (e) {
+      console.error("❌ [WEBHOOK BIEL] erro inesperado:", e);
+    }
   });
 
   setInterval(async () => {
@@ -549,33 +617,47 @@ function iniciarAryanAlmeida() {
       if (topic && topic !== 'payment') return;
 
       const paymentId = extrairPaymentIdWebhook(req);
+      console.log(`📩 [WEBHOOK ARYAN] recebido | topic: ${topic || '-'} | paymentId: ${paymentId}`);
       if (!paymentId) return;
 
       const pagamento = await buscarPagamentoMP(MP_TOKEN, paymentId);
+      console.log(`🔎 [WEBHOOK ARYAN] pagamento ${paymentId} | status: ${pagamento?.status}`);
       if (!pagamento || pagamento.status !== 'approved') return;
 
       const txid = String(paymentId);
       if (processados.has(txid)) return;
-      processados.add(txid);
 
       const meta = extrairMetadata(pagamento);
       const pendente = pagamentos.find(p => String(p.txid) === txid);
-      const chatId = meta.chatId || pendente?.chatId;
+      const chatId = (meta.chatId || meta.chat_id || pendente?.chatId) ? String(meta.chatId || meta.chat_id || pendente?.chatId) : null;
       const plano = meta.plano || pendente?.plano;
       const mensagemId = pendente?.mensagemId;
 
-      if (!chatId) return;
+      if (!chatId) {
+        console.error(`❌ [WEBHOOK ARYAN] chatId ausente no pagamento ${txid}`);
+        return;
+      }
+
       if (pendente) pendente.status = 'approved';
+      if (mensagemId) try { await bot.deleteMessage(chatId, mensagemId); } catch (e) {}
 
-      const invite = await bot.createChatInviteLink(CHANNEL_ID, { member_limit: 1 });
-      if (mensagemId) try { await bot.deleteMessage(String(chatId), mensagemId); } catch (e) {}
-      await bot.sendMessage(chatId, `🎉 PAGAMENTO APROVADO!\n\nSeu pagamento foi confirmado ✅\n\n🔒 Acesso liberado:\n\n${invite.invite_link}\n\n⚠️ Link único com limite de 1 uso.`);
+      const entregue = await entregarLinkCanal({
+        bot,
+        channelId: CHANNEL_ID,
+        chatId,
+        mensagemSucesso: (link) => `🎉 PAGAMENTO APROVADO!\n\nSeu pagamento foi confirmado ✅\n\n🔒 Acesso liberado:\n\n${link}\n\n⚠️ Link único com limite de 1 uso.`
+      });
 
-      const agora = Date.now(); let validade = null;
-      if (plano === '7_dias') validade = agora + (7 * 24 * 60 * 60 * 1000);
-      else if (plano === '30_dias') validade = agora + (30 * 24 * 60 * 60 * 1000);
-      if (validade) assinantes.push({ chatId: String(chatId), validade });
-    } catch (e) {}
+      if (entregue) {
+        processados.add(txid);
+        const agora = Date.now(); let validade = null;
+        if (plano === '7_dias') validade = agora + (7 * 24 * 60 * 60 * 1000);
+        else if (plano === '30_dias') validade = agora + (30 * 24 * 60 * 60 * 1000);
+        if (validade) assinantes.push({ chatId, validade });
+      }
+    } catch (e) {
+      console.error("❌ [WEBHOOK ARYAN] erro inesperado:", e);
+    }
   });
 
   setInterval(async () => {
@@ -603,7 +685,6 @@ function iniciarAryanAlmeida() {
 // ==========================================
 // 7. INICIALIZADOR GLOBAL
 // ==========================================
-// Comente as linhas abaixo caso queira desligar algum bot temporariamente
 iniciarAcervoBrasil();
 iniciarMlkBrasileiro();
 iniciarBielSalles();
