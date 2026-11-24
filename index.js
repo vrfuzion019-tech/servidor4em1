@@ -9,15 +9,15 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 const PORT = process.env.PORT || 3000;
-const WIINPAY_API = "https://api-v2.wiinpay.com.br";
+const MP_API = "https://api.mercadopago.com";
 
 function getPublicUrl() {
   const url = process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '';
-  return String(url).replace(/\/\$/, '');
+  return String(url).replace(/\/+$/, '');
 }
 
 app.get('/', (req, res) => {
-  res.send(`🟢 Super Servidor ONLINE! Rodando 4 Bots simultaneamente.`);
+  res.send(`🟢 Super Servidor ONLINE! Rodando 4 Bots simultaneamente (Mercado Pago).`);
 });
 
 app.listen(PORT, '0.0.0.0', () => {
@@ -25,38 +25,89 @@ app.listen(PORT, '0.0.0.0', () => {
 });
 
 // ==========================================
-// 2. FUNÇÕES GLOBAIS DA WIINPAY (Economiza código)
+// 2. FUNÇÕES GLOBAIS DO MERCADO PAGO
 // ==========================================
-function objetoPagamento(payload) {
-  if (!payload || typeof payload !== 'object') return {};
-  if (payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)) return payload.data;
-  if (Array.isArray(payload.data) && payload.data[0]) return payload.data[0];
-  if (payload.payment && typeof payload.payment === 'object') return payload.payment;
-  return payload;
+function gerarIdempotencyKey(prefix = 'pix') {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
-function extrairStatus(payload) {
-  const obj = objetoPagamento(payload);
-  const bruto = obj.status ?? obj.payment_status ?? obj.state ?? obj.situation ?? '';
-  return String(bruto).toLowerCase().trim();
+
+async function criarPagamentoPixMP({ accessToken, valor, nome, email, descricao, metadata, notificationUrl }) {
+  if (!accessToken) {
+    throw new Error("Access Token do Mercado Pago não configurado.");
+  }
+
+  const res = await fetch(`${MP_API}/v1/payments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`,
+      'X-Idempotency-Key': gerarIdempotencyKey(metadata?.chatId || 'vip')
+    },
+    body: JSON.stringify({
+      transaction_amount: Number(Number(valor).toFixed(2)),
+      description: descricao,
+      payment_method_id: "pix",
+      payer: {
+        email: email || "cliente@vip.com",
+        first_name: nome || "Cliente"
+      },
+      metadata: metadata || {},
+      notification_url: notificationUrl
+    })
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    console.error("Erro ao criar Pix no Mercado Pago:", data);
+    throw new Error(data?.message || "Erro ao criar pagamento no Mercado Pago");
+  }
+
+  const qrCode =
+    data?.point_of_interaction?.transaction_data?.qr_code ||
+    data?.qr_code ||
+    null;
+
+  const paymentId = data?.id || null;
+
+  return { paymentId, qrCode, raw: data };
 }
-function pagamentoAprovado(payload) {
-  const s = extrairStatus(payload);
-  return ['paid', 'pago', 'approved', 'aprovado', 'completed', 'success', 'liquidado'].includes(s);
+
+async function buscarPagamentoMP(accessToken, paymentId) {
+  if (!accessToken || !paymentId) return null;
+
+  const res = await fetch(`${MP_API}/v1/payments/${encodeURIComponent(String(paymentId))}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`
+    }
+  });
+
+  if (!res.ok) {
+    console.error(`Falha ao consultar pagamento ${paymentId} no Mercado Pago:`, res.status);
+    return null;
+  }
+
+  return res.json();
 }
-function extrairPaymentId(payload) {
-  const obj = objetoPagamento(payload);
-  return obj.paymentId || obj.payment_id || obj.id || obj.txid || payload.paymentId || payload.id || null;
+
+function extrairPaymentIdWebhook(req) {
+  return (
+    req.body?.data?.id ||
+    req.query?.['data.id'] ||
+    req.query?.id ||
+    (req.body?.resource && /^\d+$/.test(String(req.body.resource)) ? req.body.resource : null) ||
+    null
+  );
 }
-function extrairQrCode(payload) {
-  const obj = objetoPagamento(payload);
-  return obj.qr_code || obj.qrCode || obj.copia_cola || obj.brCode || obj.pix_code || obj.code || null;
-}
-function extrairMetadata(payload) {
-  const obj = objetoPagamento(payload);
-  const meta = obj.metadata || payload.metadata || {};
-  if (typeof meta === 'string') { try { return JSON.parse(meta); } catch (e) { return {}; } }
+
+function extrairMetadata(pagamento) {
+  const meta = pagamento?.metadata || {};
+  if (typeof meta === 'string') {
+    try { return JSON.parse(meta); } catch (e) { return {}; }
+  }
   return meta || {};
 }
+
 function getDataAmanha() {
   const amanha = new Date();
   amanha.setDate(amanha.getDate() + 1);
@@ -71,24 +122,25 @@ function getDataAmanha() {
 // ==========================================
 function iniciarAcervoBrasil() {
   if (!process.env.TOKEN_ACERVO) return console.log("⚠️ TOKEN_ACERVO ausente.");
-  
+
   const bot = new TelegramBot(process.env.TOKEN_ACERVO, { polling: true });
   const CHANNEL_ID = process.env.CHANNEL_ACERVO;
-  const WIINPAY_TOKEN = process.env.WIINPAY_TOKEN_ACERVO || process.env.WIINPAY_TOKEN;
+  const MP_TOKEN = process.env.MP_TOKEN_ACERVO || process.env.MP_ACCESS_TOKEN;
   const pagamentosPendentes = new Map();
+  const processados = new Set();
 
-  const VIDEO_START = 'BAACAgEAAxkBAAMDasfXsVxDTJuo2F6Dz6BUJaPu6XAAAs0JAAJkbzlGBVE4HlctfSA9BA'; 
+  const VIDEO_START = 'BAACAgEAAxkBAAMDasfXsVxDTJuo2F6Dz6BUJaPu6XAAAs0JAAJkbzlGBVE4HlctfSA9BA';
   const botoesPlanos = {
     inline_keyboard: [
-      [{ text: "😈 PLANO MENSAL (R\$ 14,90)", callback_data: "plano_mensal" }],
-      [{ text: "🔥 VITALÍCIO - R\$ 29,90", callback_data: "plano_vitalicio" }]
+      [{ text: "😈 PLANO MENSAL (R$ 14,90)", callback_data: "plano_mensal" }],
+      [{ text: "🔥 VITALÍCIO - R$ 29,90", callback_data: "plano_vitalicio" }]
     ]
   };
 
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
-    const textoLegenda = "🇧🇷 <b>ACERVO BRASIL +18</b> 🇧🇷\n\nAqui você encontra as melhores chamadinhas, lives e vazados com atualização todo dia.\n\nNada de enrolação, o link é gerado automaticamente após o pagamento.\n\n🌍 Payment via PayPal 15$ USD\n👉 acervobr55@gmail.com\nSend the proof of payment to: @hiagokff\n\nEscolhe seu acesso:\n\n😈 <b>PLANO MENSAL</b>\n👉 30 dias de acesso — R\$ 14,90\n\n🔥 <b>Pagamento único. Acesso pra sempre.</b>\n👉 De <s>R\$ 60,00</s> por apenas R\$ 29,90\n\n⚠️ O acesso Vitalício está disponível até <b>" + getDataAmanha() + "</b>, são poucas vagas.\n\n🔒 Garante seu acesso agora 👇";
-    try { await bot.sendVideo(chatId, VIDEO_START, { caption: textoLegenda, parse_mode: "HTML", reply_markup: botoesPlanos }); } 
+    const textoLegenda = "🇧🇷 <b>ACERVO BRASIL +18</b> 🇧🇷\n\nAqui você encontra as melhores chamadinhas, lives e vazados com atualização todo dia.\n\nNada de enrolação, o link é gerado automaticamente após o pagamento.\n\n🌍 Payment via PayPal 15$ USD\n👉 acervobr55@gmail.com\nSend the proof of payment to: @hiagokff\n\nEscolhe seu acesso:\n\n😈 <b>PLANO MENSAL</b>\n👉 30 dias de acesso — R$ 14,90\n\n🔥 <b>Pagamento único. Acesso pra sempre.</b>\n👉 De <s>R$ 60,00</s> por apenas R$ 29,90\n\n⚠️ O acesso Vitalício está disponível até <b>" + getDataAmanha() + "</b>, são poucas vagas.\n\n🔒 Garante seu acesso agora 👇";
+    try { await bot.sendVideo(chatId, VIDEO_START, { caption: textoLegenda, parse_mode: "HTML", reply_markup: botoesPlanos }); }
     catch (e) { await bot.sendMessage(chatId, textoLegenda, { parse_mode: "HTML", reply_markup: botoesPlanos }); }
   });
 
@@ -101,46 +153,74 @@ function iniciarAcervoBrasil() {
 
     try {
       const URL_WEBHOOK = `${getPublicUrl()}/webhook/acervo`;
-      const res = await fetch(`${WIINPAY_API}/payment/create`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: WIINPAY_TOKEN, value: valor, name: "Cliente Private Boy", email: "vip@privateboy.com", description: `Plano VIP ${plano}`, metadata: { chatId: String(chatId), plano: plano }, webhook_url: URL_WEBHOOK })
+      const { qrCode, paymentId } = await criarPagamentoPixMP({
+        accessToken: MP_TOKEN,
+        valor,
+        nome: "Cliente Private Boy",
+        email: "vip@privateboy.com",
+        descricao: `Plano VIP ${plano}`,
+        metadata: { chatId: String(chatId), plano },
+        notificationUrl: URL_WEBHOOK
       });
-      const json = await res.json();
-      bot.deleteMessage(chatId, msgL.message_id).catch(() => {});
-      const qr = json.data?.qr_code || json.qr_code;
-      if (!qr) throw new Error("Erro PIX");
 
-      await bot.sendMessage(chatId, `💳 <b>PIX GERADO COM SUCESSO</b>\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n<code>${qr}</code>\n\n📌 Toca no código aí em cima pra copiar.\n\n✅ O link do grupo sai na hora!`, { parse_mode: "HTML" });
-      pagamentosPendentes.set(String(chatId), { timestamp: Date.now(), etapa: 0 });
-    } catch (e) { bot.sendMessage(chatId, "⚠️ Instabilidade. Tenta de novo."); }
+      bot.deleteMessage(chatId, msgL.message_id).catch(() => {});
+      if (!qrCode || !paymentId) throw new Error("Erro PIX");
+
+      await bot.sendMessage(
+        chatId,
+        `💳 <b>PIX GERADO COM SUCESSO</b>\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n<code>${qrCode}</code>\n\n📌 Toca no código aí em cima pra copiar.\n\n✅ O link do grupo sai na hora!`,
+        { parse_mode: "HTML" }
+      );
+      pagamentosPendentes.set(String(chatId), { timestamp: Date.now(), etapa: 0, paymentId: String(paymentId) });
+    } catch (e) {
+      bot.deleteMessage(chatId, msgL.message_id).catch(() => {});
+      bot.sendMessage(chatId, "⚠️ Instabilidade. Tenta de novo.");
+    }
   });
 
   app.post('/webhook/acervo', async (req, res) => {
     res.send('ok');
-    const data = req.body?.data || req.body;
-    if (['paid', 'pago', 'approved', 'aprovado', 'liquidado'].includes(String(data.status || data.payment_status).toLowerCase())) {
-      const meta = data.metadata || {};
-      if (meta.chatId) {
-        pagamentosPendentes.delete(String(meta.chatId)); 
+    try {
+      const topic = req.body?.type || req.query?.type || req.query?.topic;
+      if (topic && topic !== 'payment') return;
+
+      const paymentId = extrairPaymentIdWebhook(req);
+      if (!paymentId) return;
+
+      const pagamento = await buscarPagamentoMP(MP_TOKEN, paymentId);
+      if (!pagamento || pagamento.status !== 'approved') return;
+
+      const chave = String(paymentId);
+      if (processados.has(chave)) return;
+      processados.add(chave);
+
+      const meta = extrairMetadata(pagamento);
+      const chatId = meta.chatId ? String(meta.chatId) : null;
+      const plano = meta.plano;
+
+      if (chatId) {
+        pagamentosPendentes.delete(chatId);
         try {
           const invite = await bot.createChatInviteLink(CHANNEL_ID, { member_limit: 1 });
-          let texto = meta.plano === 'vitalicio' ? "🎉 <b>PAGAMENTO APROVADO!</b>\n\nLink do Grupo VIP: " + invite.invite_link + "\n\n⚠️ <b>Aviso:</b> Você é Vitalício! Acesso garantido pra sempre." : "🎉 <b>PAGAMENTO APROVADO!</b>\n\nLink do Grupo VIP (30 dias): " + invite.invite_link;
-          await bot.sendMessage(meta.chatId, texto, { parse_mode: 'HTML' });
+          let texto = plano === 'vitalicio'
+            ? "🎉 <b>PAGAMENTO APROVADO!</b>\n\nLink do Grupo VIP: " + invite.invite_link + "\n\n⚠️ <b>Aviso:</b> Você é Vitalício! Acesso garantido pra sempre."
+            : "🎉 <b>PAGAMENTO APROVADO!</b>\n\nLink do Grupo VIP (30 dias): " + invite.invite_link;
+          await bot.sendMessage(chatId, texto, { parse_mode: 'HTML' });
         } catch (e) {}
       }
-    }
+    } catch (e) {}
   });
 
   setInterval(() => {
     const agora = Date.now();
     for (const [chatId, dados] of pagamentosPendentes.entries()) {
       const min = (agora - dados.timestamp) / 60000;
-      if (min >= 5 && dados.etapa === 0) { dados.etapa = 1; bot.sendMessage(chatId, `⏳ Mano, vi que você gerou o PIX mas não finalizou.\n\nO acesso é imediato, só falta o pagamento pra entrar! 🔥 Clica aí e garante antes que perca a vaga.`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); } 
+      if (min >= 5 && dados.etapa === 0) { dados.etapa = 1; bot.sendMessage(chatId, `⏳ Mano, vi que você gerou o PIX mas não finalizou.\n\nO acesso é imediato, só falta o pagamento pra entrar! 🔥 Clica aí e garante antes que perca a vaga.`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); }
       else if (min >= 15 && dados.etapa === 1) { dados.etapa = 2; bot.sendMessage(chatId, `👀 E aí, vai ficar moscando?\n\nO grupo tá bombando agora mesmo! Copia o PIX ali em cima ou gera de novo. O bagulho é louco e sai na hora. 😈`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); }
       else if (min >= 30 && dados.etapa === 2) { dados.etapa = 3; bot.sendMessage(chatId, `⚠️ SE LIGA: Seu código PIX vai expirar, parceiro!\n\nAinda dá tempo de colar com a gente. Finaliza o pagamento agora ou gera um novo código:`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); }
       else if (min >= 60 && dados.etapa === 3) { bot.sendMessage(chatId, `🚨 ÚLTIMA CHAMADA!\n\nSeu pedido foi cancelado. Se ainda quiser colar com a gente, gera um novo pagamento aí embaixo 👇`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); pagamentosPendentes.delete(chatId); }
     }
-  }, 60000); 
+  }, 60000);
 }
 
 // ==========================================
@@ -148,25 +228,27 @@ function iniciarAcervoBrasil() {
 // ==========================================
 function iniciarMlkBrasileiro() {
   if (!process.env.TOKEN_TRIBO) return console.log("⚠️ TOKEN_TRIBO ausente.");
-  
+
   const bot = new TelegramBot(process.env.TOKEN_TRIBO, { polling: true });
   const CHANNEL_ID = process.env.CHANNEL_TRIBO;
-  const WIINPAY_TOKEN = process.env.WIINPAY_TOKEN_TRIBO || process.env.WIINPAY_TOKEN;
-  const vitalicios = []; 
+  const MP_TOKEN = process.env.MP_TOKEN_TRIBO || process.env.MP_ACCESS_TOKEN;
+  const vitalicios = [];
   const pagamentosPendentes = new Map();
+  const processados = new Set();
 
-  const PHOTO_START = 'AgACAgEAAxkBAAMKauyYIIuALKzh6EyonG1XDDHExk8AArYMaxtC6mhHNVO84I4U0FIBAAMCAAN5AAM9BA'; 
+  const PHOTO_START = 'AgACAgEAAxkBAAMKauyYIIuALKzh6EyonG1XDDHExk8AArYMaxtC6mhHNVO84I4U0FIBAAMCAAN5AAM9BA';
   const botoesPlanos = {
     inline_keyboard: [
-      [{ text: "🥉 MENSAL (R\$ 14,90)", callback_data: "plano_mensal" }],
-      [{ text: "💎 VITALÍCIO - R\$ 29,90 🔥", callback_data: "plano_vitalicio" }]
+      [{ text: "🥉 MENSAL (R$ 14,90)", callback_data: "plano_mensal" }],
+      [{ text: "💎 VITALÍCIO - R$ 29,90 🔥", callback_data: "plano_vitalicio" }],
+      [{ text: "🧪 TESTE (R$ 2,00)", callback_data: "plano_teste" }]
     ]
   };
 
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     const textoLegenda = `<b>🇧🇷 MLK BRASILEIRO 🇧🇷</b>\n\nPapo reto, os conteúdos mais brabos, CHAMADINHAS, LIVES, VAZADINHOS que tu não acha em lugar nenhum, com atualizações diárias.\n\n🌍 Payment via PayPal 15$ USD\n👉 acervobr55@gmail.com\nSend the proof of payment to: @hiagokff\n\nEscolhe teu plano aí embaixo:\n\n🥉 <b>PLANO MENSAL</b>\n👉 Acesso por 30 dias - R$ 14,90\n\n💎 <b>PLANO VITALÍCIO</b> (OFERTA RELÂMPAGO)\n👉 DE <s>R$ 60,00</s> POR APENAS R$ 29,90 <b>(50% OFF 🔥)</b>\nPagamento único. O bagulho é teu pra sempre!\n\n🔥 GARANTE LOGO O TEU ACESSO 🔥`;
-    try { await bot.sendPhoto(chatId, PHOTO_START, { caption: textoLegenda, parse_mode: "HTML", reply_markup: botoesPlanos }); } 
+    try { await bot.sendPhoto(chatId, PHOTO_START, { caption: textoLegenda, parse_mode: "HTML", reply_markup: botoesPlanos }); }
     catch (e) { await bot.sendMessage(chatId, textoLegenda, { parse_mode: "HTML", reply_markup: botoesPlanos }); }
     setTimeout(async () => { await bot.sendMessage(chatId, `⚠️ <b>Papo reto:</b> Assinantes tem um comando exclusivo (/resgatar) pra pegar o link de novo caso dê caô e o grupo caia.`, { parse_mode: 'HTML' }); }, 1000);
   });
@@ -183,53 +265,81 @@ function iniciarMlkBrasileiro() {
   bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
     bot.answerCallbackQuery(query.id).catch(() => {});
-    const plano = query.data === "plano_mensal" ? "mensal" : "vitalicio";
-    const valor = plano === "mensal" ? 14.90 : 29.90;
+    const plano = query.data === "plano_mensal" ? "mensal" : query.data === "plano_teste" ? "teste" : "vitalicio";
+    const valor = plano === "mensal" ? 14.90 : plano === "teste" ? 2.00 : 29.90;
     const msgL = await bot.sendMessage(chatId, "⏳ Segura a onda, gerando teu PIX...");
 
     try {
       const URL_WEBHOOK = `${getPublicUrl()}/webhook/tribo`;
-      const res = await fetch(`${WIINPAY_API}/payment/create`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: WIINPAY_TOKEN, value: valor, name: "Cliente Mlk Brasileiro", email: "vip@mlkbrasileiro.com", description: `Plano VIP ${plano}`, metadata: { chatId: String(chatId), plano: plano }, webhook_url: URL_WEBHOOK })
+      const { qrCode, paymentId } = await criarPagamentoPixMP({
+        accessToken: MP_TOKEN,
+        valor,
+        nome: "Cliente Mlk Brasileiro",
+        email: "vip@mlkbrasileiro.com",
+        descricao: `Plano VIP ${plano}`,
+        metadata: { chatId: String(chatId), plano },
+        notificationUrl: URL_WEBHOOK
       });
-      const json = await res.json();
-      bot.deleteMessage(chatId, msgL.message_id).catch(() => {});
-      const qr = json.data?.qr_code || json.qr_code;
-      if (!qr) throw new Error("Erro PIX");
 
-      await bot.sendMessage(chatId, `💳 <b>PIX GERADO NO ESQUEMA</b>\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n<code>${qr}</code>\n\n📌 Toca no código aí em cima pra copiar.\n\n✅ O acesso cai na hora!`, { parse_mode: "HTML" });
-      pagamentosPendentes.set(String(chatId), { timestamp: Date.now(), etapa: 0 });
-    } catch (e) { bot.sendMessage(chatId, "⚠️ Instabilidade. Tenta de novo rapidinho."); }
+      bot.deleteMessage(chatId, msgL.message_id).catch(() => {});
+      if (!qrCode || !paymentId) throw new Error("Erro PIX");
+
+      await bot.sendMessage(
+        chatId,
+        `💳 <b>PIX GERADO NO ESQUEMA</b>\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n<code>${qrCode}</code>\n\n📌 Toca no código aí em cima pra copiar.\n\n✅ O acesso cai na hora!`,
+        { parse_mode: "HTML" }
+      );
+      pagamentosPendentes.set(String(chatId), { timestamp: Date.now(), etapa: 0, paymentId: String(paymentId) });
+    } catch (e) {
+      bot.deleteMessage(chatId, msgL.message_id).catch(() => {});
+      bot.sendMessage(chatId, "⚠️ Instabilidade. Tenta de novo rapidinho.");
+    }
   });
 
   app.post('/webhook/tribo', async (req, res) => {
     res.send('ok');
-    const data = req.body?.data || req.body;
-    if (['paid', 'pago', 'approved', 'aprovado', 'liquidado'].includes(String(data.status || data.payment_status).toLowerCase())) {
-      const meta = data.metadata || {};
-      if (meta.chatId) {
-        pagamentosPendentes.delete(String(meta.chatId)); 
+    try {
+      const topic = req.body?.type || req.query?.type || req.query?.topic;
+      if (topic && topic !== 'payment') return;
+
+      const paymentId = extrairPaymentIdWebhook(req);
+      if (!paymentId) return;
+
+      const pagamento = await buscarPagamentoMP(MP_TOKEN, paymentId);
+      if (!pagamento || pagamento.status !== 'approved') return;
+
+      const chave = String(paymentId);
+      if (processados.has(chave)) return;
+      processados.add(chave);
+
+      const meta = extrairMetadata(pagamento);
+      const chatId = meta.chatId ? String(meta.chatId) : null;
+      const plano = meta.plano;
+
+      if (chatId) {
+        pagamentosPendentes.delete(chatId);
         try {
           const invite = await bot.createChatInviteLink(CHANNEL_ID, { member_limit: 1 });
-          const texto = meta.plano === 'vitalicio' ? `🎉 <b>PAGAMENTO APROVADO, CRIA!</b>\n\nLink do Grupo VIP: ${invite.invite_link}\n\n⚠️ <b>VISÃO:</b> Tu é Vitalício! Se der caô no grupo, digita /resgatar aqui no bot!` : `🎉 <b>PAGAMENTO APROVADO, CRIA!</b>\n\nLink do Grupo VIP (30 dias): ${invite.invite_link}`;
-          await bot.sendMessage(meta.chatId, texto, { parse_mode: 'HTML' });
-          if (meta.plano === 'vitalicio' && !vitalicios.includes(String(meta.chatId))) vitalicios.push(String(meta.chatId));
+          const texto = plano === 'vitalicio'
+            ? `🎉 <b>PAGAMENTO APROVADO, CRIA!</b>\n\nLink do Grupo VIP: ${invite.invite_link}\n\n⚠️ <b>VISÃO:</b> Tu é Vitalício! Se der caô no grupo, digita /resgatar aqui no bot!`
+            : `🎉 <b>PAGAMENTO APROVADO, CRIA!</b>\n\nLink do Grupo VIP (30 dias): ${invite.invite_link}`;
+          await bot.sendMessage(chatId, texto, { parse_mode: 'HTML' });
+          if (plano === 'vitalicio' && !vitalicios.includes(chatId)) vitalicios.push(chatId);
         } catch (e) {}
       }
-    }
+    } catch (e) {}
   });
 
   setInterval(() => {
     const agora = Date.now();
     for (const [chatId, dados] of pagamentosPendentes.entries()) {
       const min = (agora - dados.timestamp) / 60000;
-      if (min >= 5 && dados.etapa === 0) { dados.etapa = 1; bot.sendMessage(chatId, `⏳ Coé! Vi que tu gerou o PIX mas não finalizou.\n\nO acesso é imediato, só falta o pagamento pra entrar na resenha! 🔥 Clica aí e garante antes que tu perca a vaga.`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); } 
+      if (min >= 5 && dados.etapa === 0) { dados.etapa = 1; bot.sendMessage(chatId, `⏳ Coé! Vi que tu gerou o PIX mas não finalizou.\n\nO acesso é imediato, só falta o pagamento pra entrar na resenha! 🔥 Clica aí e garante antes que tu perca a vaga.`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); }
       else if (min >= 15 && dados.etapa === 1) { dados.etapa = 2; bot.sendMessage(chatId, `👀 Tá moscando?\n\nO grupo tá pegando fogo agora mermo! Copia o PIX ali em cima ou gera de novo. O bagulho é louco e sai na hora. 😈`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); }
       else if (min >= 30 && dados.etapa === 2) { dados.etapa = 3; bot.sendMessage(chatId, `⚠️ VISÃO: Teu código PIX vai expirar, parceiro!\n\nAinda dá tempo de garantir teu acesso. Finaliza o pagamento agora ou gera um novo código:`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); }
       else if (min >= 60 && dados.etapa === 3) { bot.sendMessage(chatId, `🚨 ÚLTIMA CHANCE!\n\nTeu pedido rodou e a vaga vai pro próximo cria da fila 👇`, { parse_mode: "HTML", reply_markup: botoesPlanos }).catch(()=>{}); pagamentosPendentes.delete(chatId); }
     }
-  }, 60000); 
+  }, 60000);
 }
 
 // ==========================================
@@ -237,18 +347,18 @@ function iniciarMlkBrasileiro() {
 // ==========================================
 function iniciarBielSalles() {
   if (!process.env.TOKEN_BIEL) return console.log("⚠️ TOKEN_BIEL ausente.");
-  
+
   const bot = new TelegramBot(process.env.TOKEN_BIEL, { polling: true });
   const CHANNEL_ID = process.env.CHANNEL_BIEL;
-  const WIINPAY_KEY = process.env.WIINPAY_TOKEN_BIEL || process.env.WIINPAY_TOKEN;
-  
+  const MP_TOKEN = process.env.MP_TOKEN_BIEL || process.env.MP_ACCESS_TOKEN;
+
   const pagamentos = []; const assinantes = []; const processados = new Set();
 
   const botoesPlanos = {
     inline_keyboard: [
-      [{ text: "R\$ 15,00 / Acesso VIP (24h) - 7 Dias", callback_data: "plano_7" }],
-      [{ text: "R\$ 24,90 / Acesso VIP 25% OFF - 30 Dias", callback_data: "plano_30" }],
-      [{ text: "R\$ 49,90 / Acesso VIP (24h) - Vitalício", callback_data: "plano_vitalicio" }]
+      [{ text: "R$ 15,00 / Acesso VIP (24h) - 7 Dias", callback_data: "plano_7" }],
+      [{ text: "R$ 24,90 / Acesso VIP 25% OFF - 30 Dias", callback_data: "plano_30" }],
+      [{ text: "R$ 49,90 / Acesso VIP (24h) - Vitalício", callback_data: "plano_vitalicio" }]
     ]
   };
 
@@ -281,39 +391,57 @@ function iniciarBielSalles() {
 
     try {
       const URL_WEBHOOK = `${getPublicUrl()}/webhook/biel`;
-      const response = await fetch(`${WIINPAY_API}/payment/create`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: WIINPAY_KEY, value: valor, name: "Cliente VIP Biel", email: "vip@bielsalles.com", description: nomePlano, metadata: { chatId: String(chatId), plano: tipoPlano }, webhook_url: URL_WEBHOOK })
+      const { qrCode, paymentId } = await criarPagamentoPixMP({
+        accessToken: MP_TOKEN,
+        valor,
+        nome: "Cliente VIP Biel",
+        email: "vip@bielsalles.com",
+        descricao: nomePlano,
+        metadata: { chatId: String(chatId), plano: tipoPlano },
+        notificationUrl: URL_WEBHOOK
       });
-      const json = await response.json();
-      bot.deleteMessage(chatId, msgLoading.message_id).catch(() => {});
-      const qrcode = extrairQrCode(json); const txid = extrairPaymentId(json);
-      if (!qrcode || !txid) throw new Error("Sem QR Code");
 
-      const texto = `💳 PIX GERADO COM SUCESSO\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n📋 Código PIX (Copia e Cola):\n\n\`\${qrcode}\`\n\n📌 Toque no código acima para copiar.\n\n⏳ O acesso é liberado automaticamente após o pagamento.`;
+      bot.deleteMessage(chatId, msgLoading.message_id).catch(() => {});
+      if (!qrCode || !paymentId) throw new Error("Sem QR Code");
+
+      const texto = `💳 PIX GERADO COM SUCESSO\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n📋 Código PIX (Copia e Cola):\n\n\`${qrCode}\`\n\n📌 Toque no código acima para copiar.\n\n⏳ O acesso é liberado automaticamente após o pagamento.`;
       const mensagemPix = await bot.sendMessage(chatId, texto, { parse_mode: "Markdown" });
-      pagamentos.push({ txid: String(txid), chatId: String(chatId), mensagemId: String(mensagemPix.message_id), status: "pending", createdAt: Date.now(), etapaFunil: 0, plano: tipoPlano });
-    } catch (e) { bot.sendMessage(chatId, "⚠️ Sistema indisponível."); }
+      pagamentos.push({ txid: String(paymentId), chatId: String(chatId), mensagemId: String(mensagemPix.message_id), status: "pending", createdAt: Date.now(), etapaFunil: 0, plano: tipoPlano });
+    } catch (e) {
+      bot.deleteMessage(chatId, msgLoading.message_id).catch(() => {});
+      bot.sendMessage(chatId, "⚠️ Sistema indisponível.");
+    }
   });
 
   app.post('/webhook/biel', async (req, res) => {
     res.status(200).json({ ok: true });
     try {
-      const payload = req.body || {};
-      if (!pagamentoAprovado(payload)) return;
-      const txid = extrairPaymentId(payload); const meta = extrairMetadata(payload);
-      const pendente = pagamentos.find(p => String(p.txid) === String(txid));
-      const chatId = meta.chatId || pendente?.chatId; const plano = meta.plano || pendente?.plano; const mensagemId = pendente?.mensagemId;
+      const topic = req.body?.type || req.query?.type || req.query?.topic;
+      if (topic && topic !== 'payment') return;
+
+      const paymentId = extrairPaymentIdWebhook(req);
+      if (!paymentId) return;
+
+      const pagamento = await buscarPagamentoMP(MP_TOKEN, paymentId);
+      if (!pagamento || pagamento.status !== 'approved') return;
+
+      const txid = String(paymentId);
+      if (processados.has(txid)) return;
+      processados.add(txid);
+
+      const meta = extrairMetadata(pagamento);
+      const pendente = pagamentos.find(p => String(p.txid) === txid);
+      const chatId = meta.chatId || pendente?.chatId;
+      const plano = meta.plano || pendente?.plano;
+      const mensagemId = pendente?.mensagemId;
 
       if (!chatId) return;
-      const chave = String(txid || `${chatId}-${plano}`);
-      if (processados.has(chave)) return;
-      processados.add(chave);
+      if (pendente) pendente.status = 'approved';
 
       const invite = await bot.createChatInviteLink(CHANNEL_ID, { member_limit: 1 });
       if (mensagemId) try { await bot.deleteMessage(String(chatId), mensagemId); } catch (e) {}
       await bot.sendMessage(chatId, `🎉 PAGAMENTO APROVADO!\n\nSeu pagamento foi confirmado ✅\n\n🔒 Acesso liberado:\n\n${invite.invite_link}\n\n⚠️ Link único com limite de 1 uso.`);
-      
+
       const agora = Date.now(); let validade = null;
       if (plano === '7_dias') validade = agora + (7 * 24 * 60 * 60 * 1000);
       else if (plano === '30_dias') validade = agora + (30 * 24 * 60 * 60 * 1000);
@@ -348,25 +476,24 @@ function iniciarBielSalles() {
 // ==========================================
 function iniciarAryanAlmeida() {
   if (!process.env.TOKEN_ARYAN) return console.log("⚠️ TOKEN_ARYAN ausente.");
-  
+
   const bot = new TelegramBot(process.env.TOKEN_ARYAN, { polling: true });
   const CHANNEL_ID = process.env.CHANNEL_ARYAN;
-  const WIINPAY_KEY = process.env.WIINPAY_TOKEN_ARYAN || process.env.WIINPAY_TOKEN;
-  
+  const MP_TOKEN = process.env.MP_TOKEN_ARYAN || process.env.MP_ACCESS_TOKEN;
+
   const pagamentos = []; const assinantes = []; const processados = new Set();
 
   const botoesPlanos = {
     inline_keyboard: [
-      [{ text: "R\$ 16,90 / Acesso VIP (24h) - 7 Dias", callback_data: "plano_7" }],
-      [{ text: "R\$ 34,90 / Acesso VIP 25% OFF - 30 Dias", callback_data: "plano_30" }],
-      [{ text: "R\$ 69,90 / Acesso VIP (24h) - Vitalício", callback_data: "plano_vitalicio" }]
+      [{ text: "R$ 16,90 / Acesso VIP (24h) - 7 Dias", callback_data: "plano_7" }],
+      [{ text: "R$ 34,90 / Acesso VIP 25% OFF - 30 Dias", callback_data: "plano_30" }],
+      [{ text: "R$ 69,90 / Acesso VIP (24h) - Vitalício", callback_data: "plano_vitalicio" }]
     ]
   };
 
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
-    // Substitua a mídia abaixo quando tiver o vídeo do Aryan
-    const MIDIA_ARYAN = 'BAACAgEAAxkBAAMFapIc9eVh_YzY9LXtb2LhovAJ89MAAqwIAAK7u5FEiAYu93eD9Kk9BA'; 
+    const MIDIA_ARYAN = 'BAACAgEAAxkBAAMFapIc9eVh_YzY9LXtb2LhovAJ89MAAqwIAAK7u5FEiAYu93eD9Kk9BA';
     const texto1 = `E aí, curtindo a visão? 😈\nQue bom que você apertou em Iniciar… Aqui não tem enrolação.\n\nSó conteúdo quente, sem censura e feito pra te deixar no grau 🔥\n\n🍑 Fotos exclusivas\n🎥 Vídeos sem corte\n💦 Conteúdos que não saem em lugar nenhum\n\nPra entrar no meu grupo VIP é só escolher o plano e pagar o PIX:`;
     const texto2 = `Assim que o PIX cair, o bot te libera na hora ⚡\nAcesso imediato, sem enrolação.\nTô te esperando 😈`;
 
@@ -393,39 +520,57 @@ function iniciarAryanAlmeida() {
 
     try {
       const URL_WEBHOOK = `${getPublicUrl()}/webhook/aryan`;
-      const response = await fetch(`${WIINPAY_API}/payment/create`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: WIINPAY_KEY, value: valor, name: "Cliente VIP Aryan", email: "vip@aryanalmeida.com", description: nomePlano, metadata: { chatId: String(chatId), plano: tipoPlano }, webhook_url: URL_WEBHOOK })
+      const { qrCode, paymentId } = await criarPagamentoPixMP({
+        accessToken: MP_TOKEN,
+        valor,
+        nome: "Cliente VIP Aryan",
+        email: "vip@aryanalmeida.com",
+        descricao: nomePlano,
+        metadata: { chatId: String(chatId), plano: tipoPlano },
+        notificationUrl: URL_WEBHOOK
       });
-      const json = await response.json();
-      bot.deleteMessage(chatId, msgLoading.message_id).catch(() => {});
-      const qrcode = extrairQrCode(json); const txid = extrairPaymentId(json);
-      if (!qrcode || !txid) throw new Error("Sem QR Code");
 
-      const texto = `💳 PIX GERADO COM SUCESSO\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n📋 Código PIX (Copia e Cola):\n\n\`\${qrcode}\`\n\n📌 Toque no código acima para copiar.\n\n⏳ O acesso é liberado automaticamente após o pagamento.`;
+      bot.deleteMessage(chatId, msgLoading.message_id).catch(() => {});
+      if (!qrCode || !paymentId) throw new Error("Sem QR Code");
+
+      const texto = `💳 PIX GERADO COM SUCESSO\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n📋 Código PIX (Copia e Cola):\n\n\`${qrCode}\`\n\n📌 Toque no código acima para copiar.\n\n⏳ O acesso é liberado automaticamente após o pagamento.`;
       const mensagemPix = await bot.sendMessage(chatId, texto, { parse_mode: "Markdown" });
-      pagamentos.push({ txid: String(txid), chatId: String(chatId), mensagemId: String(mensagemPix.message_id), status: "pending", createdAt: Date.now(), etapaFunil: 0, plano: tipoPlano });
-    } catch (e) { bot.sendMessage(chatId, "⚠️ Sistema indisponível."); }
+      pagamentos.push({ txid: String(paymentId), chatId: String(chatId), mensagemId: String(mensagemPix.message_id), status: "pending", createdAt: Date.now(), etapaFunil: 0, plano: tipoPlano });
+    } catch (e) {
+      bot.deleteMessage(chatId, msgLoading.message_id).catch(() => {});
+      bot.sendMessage(chatId, "⚠️ Sistema indisponível.");
+    }
   });
 
   app.post('/webhook/aryan', async (req, res) => {
     res.status(200).json({ ok: true });
     try {
-      const payload = req.body || {};
-      if (!pagamentoAprovado(payload)) return;
-      const txid = extrairPaymentId(payload); const meta = extrairMetadata(payload);
-      const pendente = pagamentos.find(p => String(p.txid) === String(txid));
-      const chatId = meta.chatId || pendente?.chatId; const plano = meta.plano || pendente?.plano; const mensagemId = pendente?.mensagemId;
+      const topic = req.body?.type || req.query?.type || req.query?.topic;
+      if (topic && topic !== 'payment') return;
+
+      const paymentId = extrairPaymentIdWebhook(req);
+      if (!paymentId) return;
+
+      const pagamento = await buscarPagamentoMP(MP_TOKEN, paymentId);
+      if (!pagamento || pagamento.status !== 'approved') return;
+
+      const txid = String(paymentId);
+      if (processados.has(txid)) return;
+      processados.add(txid);
+
+      const meta = extrairMetadata(pagamento);
+      const pendente = pagamentos.find(p => String(p.txid) === txid);
+      const chatId = meta.chatId || pendente?.chatId;
+      const plano = meta.plano || pendente?.plano;
+      const mensagemId = pendente?.mensagemId;
 
       if (!chatId) return;
-      const chave = String(txid || `${chatId}-${plano}`);
-      if (processados.has(chave)) return;
-      processados.add(chave);
+      if (pendente) pendente.status = 'approved';
 
       const invite = await bot.createChatInviteLink(CHANNEL_ID, { member_limit: 1 });
       if (mensagemId) try { await bot.deleteMessage(String(chatId), mensagemId); } catch (e) {}
       await bot.sendMessage(chatId, `🎉 PAGAMENTO APROVADO!\n\nSeu pagamento foi confirmado ✅\n\n🔒 Acesso liberado:\n\n${invite.invite_link}\n\n⚠️ Link único com limite de 1 uso.`);
-      
+
       const agora = Date.now(); let validade = null;
       if (plano === '7_dias') validade = agora + (7 * 24 * 60 * 60 * 1000);
       else if (plano === '30_dias') validade = agora + (30 * 24 * 60 * 60 * 1000);
