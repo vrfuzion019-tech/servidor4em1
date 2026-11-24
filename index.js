@@ -162,6 +162,20 @@ function iniciarAcervoBrasil() {
   const MP_TOKEN = process.env.MP_TOKEN_ACERVO || process.env.MP_ACCESS_TOKEN;
   const pagamentosPendentes = new Map();
   const processados = new Set();
+  const usuariosAtivos = new Set();
+
+  // Método reativado para capturar IDs de fotos e vídeos no privado do bot
+  bot.on('photo', (msg) => {
+    if (msg.chat.type !== 'private') return;
+    const fileId = msg.photo[msg.photo.length - 1].file_id;
+    bot.sendMessage(msg.chat.id, `📸 <b>ID da Foto:</b>\n<code>${fileId}</code>`, { parse_mode: 'HTML' });
+  });
+
+  bot.on('video', (msg) => {
+    if (msg.chat.type !== 'private') return;
+    const fileId = msg.video.file_id;
+    bot.sendMessage(msg.chat.id, `🎥 <b>ID do Vídeo:</b>\n<code>${fileId}</code>`, { parse_mode: 'HTML' });
+  });
 
   const VIDEO_START = 'BAACAgEAAxkBAAMDasfXsVxDTJuo2F6Dz6BUJaPu6XAAAs0JAAJkbzlGBVE4HlctfSA9BA';
   const botoesPlanos = {
@@ -171,8 +185,112 @@ function iniciarAcervoBrasil() {
     ]
   };
 
+  // Mídias + Textos Diários (Cole o ID da foto abaixo após pegar pelo bot)
+  const FOTO_DIARIA = 'COLOQUE_AQUI_O_ID_DA_FOTO';
+  const VIDEO_DIARIO = 'BAACAgEAAxkBAAIHgGqQ6eHZxTqlZsEZr5ajhxdS_g10AALzBgACuNGJRC9fmw3TnGqMPQQ';
+
+  const textos = [
+    // Texto 1 (Índice 0)
+    `🔥 Aqui sua tá GOZADA garantida 💦\n\n🎥 ATUALIZAÇÕES DIARIAS PRA VOCÊ GOZAR GOSTOSO TODOS OS DIAS!\n\n📁 MLKS ativos, passivos e versáteis\n📂 Chamadinhas selecionadas todos os dias\n💦 Só vídeos completos sem censura\n🍑 MALOKINHAS reais, só mlk gostoso da favela\n\n🎁 Assinou agora? Ganha:\n+20 grupos VIP Proibidus 🔑🔥\n\n✅ Entrada imediata\n♾ Acesso vitalício (paga uma vez só)\n👤 100% anônimo\n\nTá com tesão? Entra agora 👇`,
+
+    // Texto 2 (Índice 1)
+    `⚠️ ÚLTIMAS 6 VAGAS DE HOJE!\n\nVocê foi selecionado pro maior acervo de vazadinhos e chamadinhas de MLKS da favela 🔥\n\nO que te espera:\n\n🎥 Vídeos completos sem censura\n📱 Chamadinhas e lives vazadas\n🍑 Só maloka gostoso (ativo, passivo e versátil)\n🔥 ATUALIZAÇÕES DIARIAS PRA VOCÊ GOZAR GOSTOSO TODOS OS DIAS!\n🔒 Acesso vitalício + grupos de troca\n\nDepois de hoje o preço sobe.\n\nPara de enrolar e garante o seu 👇`,
+
+    // Texto 3 (Índice 2)
+    `Quer gozar vendo MLK da favela de verdade?\n\nAqui não tem modelo fake.\nAqui tem:\n\n🔥 Vazadinhos quentes\n🔥 Chamadinhas sujas\n🔥 Vídeos completos sem corte e sem censura\n🔥 ATUALIZAÇÕES DIARIAS PRA VOCÊ GOZAR GOSTOSO TODOS OS DIAS!\n🍑 Só malokinha gostoso da quebrada\n\nEntrada imediata + acesso vitalício + 100% anônimo.\n\nQuer gozar? Então entra agora 👇`,
+
+    // Texto 4 (Índice 3)
+    `🎉 PARABÉNS! VOCÊ FOI O SORTEADO DO DIA 🔥\n\nMais de 15.000 mídias de MLKS da favela organizadas pra você:\n\n✅ Vídeos completos sem censura\n✅ Chamadinhas e lives vazadas\n✅ Ativos, passivos e versáteis\n✅ ATUALIZAÇÕES DIARIAS PRA VOCÊ GOZAR GOSTOSO TODOS OS DIAS!\n✅ Acesso vitalício de verdade\n✅ Grupos VIP liberados\n\n⚠️ RESTAM APENAS 5 VAGAS NA PROMOÇÃO!\n\nPoucos minutos pra garantir ou perde a vaga.\n\nEntra e goza à vontade 👇`
+  ];
+
+  const botaoMensal = {
+    inline_keyboard: [
+      [{ text: "🥉 ASSINAR MENSAL - R$ 14,90", callback_data: "plano_mensal" }]
+    ]
+  };
+
+  const botaoVitalicio = {
+    inline_keyboard: [
+      [{ text: "💎 VITALÍCIO - 48% OFF 🔥", callback_data: "plano_vitalicio" }]
+    ]
+  };
+
+  async function enviarMensagemDiaria(indiceTexto, botaoEscolhido) {
+    const texto = textos[indiceTexto];
+    const usuarios = Array.from(usuariosAtivos);
+
+    console.log(`[ACERVO BRASIL] Enviando Texto ${indiceTexto + 1} para ${usuarios.length} usuários`);
+
+    for (const chatId of usuarios) {
+      try {
+        // 1º Envia a FOTO
+        if (FOTO_DIARIA && !FOTO_DIARIA.startsWith('COLOQUE_')) {
+          await bot.sendPhoto(chatId, FOTO_DIARIA);
+          await new Promise(r => setTimeout(r, 700));
+        }
+
+        // 2º Envia o VÍDEO
+        await bot.sendVideo(chatId, VIDEO_DIARIO);
+        await new Promise(r => setTimeout(r, 700));
+
+        // 3º Envia o TEXTO + BOTÃO (Mensal de dia, Vitalício à noite)
+        await bot.sendMessage(chatId, texto, {
+          parse_mode: "HTML",
+          reply_markup: botaoEscolhido
+        });
+
+        await new Promise(r => setTimeout(r, 350));
+      } catch (err) {
+        console.log(`Erro ao enviar disparo diário para ${chatId}:`, err.message);
+        usuariosAtivos.delete(String(chatId));
+      }
+    }
+  }
+
+  // Agendamento 24h (Horário de Brasília: Dia/Mensal x Noite/Vitalício)
+  let ultimoDisparoAgendado = '';
+  setInterval(() => {
+    const agora = new Date();
+    const partes = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23'
+    }).formatToParts(agora);
+
+    const mapa = {};
+    for (const p of partes) mapa[p.type] = p.value;
+    const hora = Number(mapa.hour);
+    const minuto = Number(mapa.minute);
+    const chaveDisparo = `${mapa.year}-${mapa.month}-${mapa.day}-${mapa.hour}:${mapa.minute}`;
+
+    if (minuto !== 16 || ultimoDisparoAgendado === chaveDisparo) return;
+
+    const gradeHorarios = {
+      6:  { indice: 0, botao: botaoMensal },    // 06:16 -> Texto 1
+      9:  { indice: 2, botao: botaoMensal },    // 09:16 -> Texto 3
+      12: { indice: 0, botao: botaoMensal },    // 12:16 -> Texto 1
+      15: { indice: 2, botao: botaoMensal },    // 15:16 -> Texto 3
+      18: { indice: 0, botao: botaoMensal },    // 18:16 -> Texto 1
+      21: { indice: 1, botao: botaoVitalicio }, // 21:16 -> Texto 2
+      0:  { indice: 3, botao: botaoVitalicio }, // 00:16 -> Texto 4
+      3:  { indice: 1, botao: botaoVitalicio }  // 03:16 -> Texto 2
+    };
+
+    if (gradeHorarios[hora]) {
+      ultimoDisparoAgendado = chaveDisparo;
+      enviarMensagemDiaria(gradeHorarios[hora].indice, gradeHorarios[hora].botao);
+    }
+  }, 20000);
+
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
+    usuariosAtivos.add(String(chatId));
+    console.log(`[ACERVO BRASIL] Novo usuário: ${chatId} | Total ativos: ${usuariosAtivos.size}`);
+
     const textoLegenda = "🇧🇷 <b>ACERVO BRASIL +18</b> 🇧🇷\n\nAqui você encontra as melhores chamadinhas, lives e vazados com atualização todo dia.\n\nNada de enrolação, o link é gerado automaticamente após o pagamento.\n\n🌍 Payment via PayPal 15$ USD\n👉 acervobr55@gmail.com\nSend the proof of payment to: @hiagokff\n\nEscolhe seu acesso:\n\n😈 <b>PLANO MENSAL</b>\n👉 30 dias de acesso — R$ 14,90\n\n🔥 <b>Pagamento único. Acesso pra sempre.</b>\n👉 De <s>R$ 60,00</s> por apenas R$ 29,90\n\n⚠️ O acesso Vitalício está disponível até <b>" + getDataAmanha() + "</b>, são poucas vagas.\n\n🔒 Garante seu acesso agora 👇";
     try { await bot.sendVideo(chatId, VIDEO_START, { caption: textoLegenda, parse_mode: "HTML", reply_markup: botoesPlanos }); }
     catch (e) { await bot.sendMessage(chatId, textoLegenda, { parse_mode: "HTML", reply_markup: botoesPlanos }); }
@@ -239,6 +357,7 @@ function iniciarAcervoBrasil() {
       }
 
       pagamentosPendentes.delete(chatId);
+      usuariosAtivos.delete(chatId);
       const entregue = await entregarLinkCanal({
         bot,
         channelId: CHANNEL_ID,
