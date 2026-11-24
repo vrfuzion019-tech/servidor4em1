@@ -283,8 +283,7 @@ function iniciarMlkBrasileiro() {
   const botoesPlanos = {
     inline_keyboard: [
       [{ text: "🥉 MENSAL (R$ 14,90)", callback_data: "plano_mensal" }],
-      [{ text: "💎 VITALÍCIO - R$ 29,90 🔥", callback_data: "plano_vitalicio" }],
-      [{ text: "🧪 TESTE (R$ 2,00)", callback_data: "plano_teste" }]
+      [{ text: "💎 VITALÍCIO - R$ 29,90 🔥", callback_data: "plano_vitalicio" }]
     ]
   };
 
@@ -308,8 +307,8 @@ function iniciarMlkBrasileiro() {
   bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
     bot.answerCallbackQuery(query.id).catch(() => {});
-    const plano = query.data === "plano_mensal" ? "mensal" : query.data === "plano_teste" ? "teste" : "vitalicio";
-    const valor = plano === "mensal" ? 14.90 : plano === "teste" ? 2.00 : 29.90;
+    const plano = query.data === "plano_mensal" ? "mensal" : "vitalicio";
+    const valor = plano === "mensal" ? 14.90 : 29.90;
     const msgL = await bot.sendMessage(chatId, "⏳ Segura a onda, gerando teu PIX...");
 
     try {
