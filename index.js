@@ -243,9 +243,9 @@ function iniciarAcervoBrasil() {
       const { qrCode, paymentId } = await criarPagamentoPixMP({
         accessToken: MP_TOKEN,
         valor,
-        nome: "Cliente Private Boy",
-        email: "vip@privateboy.com",
-        descricao: `Plano VIP ${plano}`,
+        nome: "Cliente Kelly Mentorias",
+        email: "vip@kellymentorias.com",
+        descricao: "Kelly Mentorias",
         metadata: { chatId: String(chatId), plano },
         notificationUrl: URL_WEBHOOK
       });
@@ -435,9 +435,9 @@ function iniciarMlkBrasileiro() {
       const { qrCode, paymentId } = await criarPagamentoPixMP({
         accessToken: MP_TOKEN,
         valor,
-        nome: "Cliente Mlk Brasileiro",
-        email: "vip@mlkbrasileiro.com",
-        descricao: `Plano VIP ${plano}`,
+        nome: "Cliente Kelly Mentorias",
+        email: "vip@kellymentorias.com",
+        descricao: "Kelly Mentorias",
         metadata: { chatId: String(chatId), plano },
         notificationUrl: URL_WEBHOOK
       });
@@ -566,9 +566,9 @@ function iniciarBielSalles() {
       const { qrCode, paymentId } = await criarPagamentoPixMP({
         accessToken: MP_TOKEN,
         valor,
-        nome: "Cliente VIP Biel",
-        email: "vip@bielsalles.com",
-        descricao: nomePlano,
+        nome: "Cliente Kelly Mentorias",
+        email: "vip@kellymentorias.com",
+        descricao: "Kelly Mentorias",
         metadata: { chatId: String(chatId), plano: tipoPlano },
         notificationUrl: URL_WEBHOOK
       });
@@ -709,9 +709,9 @@ function iniciarAryanAlmeida() {
       const { qrCode, paymentId } = await criarPagamentoPixMP({
         accessToken: MP_TOKEN,
         valor,
-        nome: "Cliente VIP Aryan",
-        email: "vip@aryanalmeida.com",
-        descricao: nomePlano,
+        nome: "Cliente Kelly Mentorias",
+        email: "vip@kellymentorias.com",
+        descricao: "Kelly Mentorias",
         metadata: { chatId: String(chatId), plano: tipoPlano },
         notificationUrl: URL_WEBHOOK
       });
