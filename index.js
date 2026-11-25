@@ -162,6 +162,7 @@ function iniciarAcervoBrasil() {
   const MP_TOKEN = process.env.MP_TOKEN_ACERVO || process.env.MP_ACCESS_TOKEN;
   const pagamentosPendentes = new Map();
   const processados = new Set();
+  const emProcessamento = new Set();
   const usuariosAtivos = new Set();
 
   const VIDEO_START = 'BAACAgEAAxkBAAMDasfXsVxDTJuo2F6Dz6BUJaPu6XAAAs0JAAJkbzlGBVE4HlctfSA9BA';
@@ -274,20 +275,21 @@ function iniciarAcervoBrasil() {
 
   app.post('/webhook/acervo', async (req, res) => {
     res.send('ok');
+    const topic = req.body?.type || req.query?.type || req.query?.topic;
+    if (topic && topic !== 'payment') return;
+
+    const paymentId = extrairPaymentIdWebhook(req);
+    console.log(`📩 [WEBHOOK ACERVO] recebido | topic: ${topic || '-'} | paymentId: ${paymentId}`);
+    if (!paymentId) return;
+
+    const chave = String(paymentId);
+    if (processados.has(chave) || emProcessamento.has(chave)) return;
+    emProcessamento.add(chave);
+
     try {
-      const topic = req.body?.type || req.query?.type || req.query?.topic;
-      if (topic && topic !== 'payment') return;
-
-      const paymentId = extrairPaymentIdWebhook(req);
-      console.log(`📩 [WEBHOOK ACERVO] recebido | topic: ${topic || '-'} | paymentId: ${paymentId}`);
-      if (!paymentId) return;
-
       const pagamento = await buscarPagamentoMP(MP_TOKEN, paymentId);
       console.log(`🔎 [WEBHOOK ACERVO] pagamento ${paymentId} | status: ${pagamento?.status}`);
       if (!pagamento || pagamento.status !== 'approved') return;
-
-      const chave = String(paymentId);
-      if (processados.has(chave)) return;
 
       const meta = extrairMetadata(pagamento);
       const chatId = meta.chatId || meta.chat_id ? String(meta.chatId || meta.chat_id) : null;
@@ -313,6 +315,8 @@ function iniciarAcervoBrasil() {
       if (entregue) processados.add(chave);
     } catch (e) {
       console.error("❌ [WEBHOOK ACERVO] erro inesperado:", e);
+    } finally {
+      emProcessamento.delete(chave);
     }
   });
 
@@ -420,6 +424,7 @@ function iniciarMlkBrasileiro() {
   const vitalicios = [];
   const pagamentosPendentes = new Map();
   const processados = new Set();
+  const emProcessamento = new Set();
 
   const PHOTO_START = 'AgACAgEAAxkBAAMKauyYIIuALKzh6EyonG1XDDHExk8AArYMaxtC6mhHNVO84I4U0FIBAAMCAAN5AAM9BA';
   const botoesPlanos = {
@@ -482,20 +487,21 @@ function iniciarMlkBrasileiro() {
 
   app.post('/webhook/tribo', async (req, res) => {
     res.send('ok');
+    const topic = req.body?.type || req.query?.type || req.query?.topic;
+    if (topic && topic !== 'payment') return;
+
+    const paymentId = extrairPaymentIdWebhook(req);
+    console.log(`📩 [WEBHOOK TRIBO] recebido | topic: ${topic || '-'} | paymentId: ${paymentId}`);
+    if (!paymentId) return;
+
+    const chave = String(paymentId);
+    if (processados.has(chave) || emProcessamento.has(chave)) return;
+    emProcessamento.add(chave);
+
     try {
-      const topic = req.body?.type || req.query?.type || req.query?.topic;
-      if (topic && topic !== 'payment') return;
-
-      const paymentId = extrairPaymentIdWebhook(req);
-      console.log(`📩 [WEBHOOK TRIBO] recebido | topic: ${topic || '-'} | paymentId: ${paymentId}`);
-      if (!paymentId) return;
-
       const pagamento = await buscarPagamentoMP(MP_TOKEN, paymentId);
       console.log(`🔎 [WEBHOOK TRIBO] pagamento ${paymentId} | status: ${pagamento?.status}`);
       if (!pagamento || pagamento.status !== 'approved') return;
-
-      const chave = String(paymentId);
-      if (processados.has(chave)) return;
 
       const meta = extrairMetadata(pagamento);
       const chatId = meta.chatId || meta.chat_id ? String(meta.chatId || meta.chat_id) : null;
@@ -522,6 +528,8 @@ function iniciarMlkBrasileiro() {
       }
     } catch (e) {
       console.error("❌ [WEBHOOK TRIBO] erro inesperado:", e);
+    } finally {
+      emProcessamento.delete(chave);
     }
   });
 
@@ -548,6 +556,7 @@ function iniciarBielSalles() {
   const MP_TOKEN = process.env.MP_TOKEN_BIEL || process.env.MP_ACCESS_TOKEN;
 
   const pagamentos = []; const assinantes = []; const processados = new Set();
+  const emProcessamento = new Set();
 
   const botoesPlanos = {
     inline_keyboard: [
@@ -610,20 +619,21 @@ function iniciarBielSalles() {
 
   app.post('/webhook/biel', async (req, res) => {
     res.status(200).json({ ok: true });
+    const topic = req.body?.type || req.query?.type || req.query?.topic;
+    if (topic && topic !== 'payment') return;
+
+    const paymentId = extrairPaymentIdWebhook(req);
+    console.log(`📩 [WEBHOOK BIEL] recebido | topic: ${topic || '-'} | paymentId: ${paymentId}`);
+    if (!paymentId) return;
+
+    const txid = String(paymentId);
+    if (processados.has(txid) || emProcessamento.has(txid)) return;
+    emProcessamento.add(txid);
+
     try {
-      const topic = req.body?.type || req.query?.type || req.query?.topic;
-      if (topic && topic !== 'payment') return;
-
-      const paymentId = extrairPaymentIdWebhook(req);
-      console.log(`📩 [WEBHOOK BIEL] recebido | topic: ${topic || '-'} | paymentId: ${paymentId}`);
-      if (!paymentId) return;
-
       const pagamento = await buscarPagamentoMP(MP_TOKEN, paymentId);
       console.log(`🔎 [WEBHOOK BIEL] pagamento ${paymentId} | status: ${pagamento?.status}`);
       if (!pagamento || pagamento.status !== 'approved') return;
-
-      const txid = String(paymentId);
-      if (processados.has(txid)) return;
 
       const meta = extrairMetadata(pagamento);
       const pendente = pagamentos.find(p => String(p.txid) === txid);
@@ -655,6 +665,8 @@ function iniciarBielSalles() {
       }
     } catch (e) {
       console.error("❌ [WEBHOOK BIEL] erro inesperado:", e);
+    } finally {
+      emProcessamento.delete(txid);
     }
   });
 
@@ -691,6 +703,7 @@ function iniciarAryanAlmeida() {
   const MP_TOKEN = process.env.MP_TOKEN_ARYAN || process.env.MP_ACCESS_TOKEN;
 
   const pagamentos = []; const assinantes = []; const processados = new Set();
+  const emProcessamento = new Set();
 
   const botoesPlanos = {
     inline_keyboard: [
@@ -743,20 +756,21 @@ function iniciarAryanAlmeida() {
 
   app.post('/webhook/aryan', async (req, res) => {
     res.status(200).json({ ok: true });
+    const topic = req.body?.type || req.query?.type || req.query?.topic;
+    if (topic && topic !== 'payment') return;
+
+    const paymentId = extrairPaymentIdWebhook(req);
+    console.log(`📩 [WEBHOOK ARYAN] recebido | topic: ${topic || '-'} | paymentId: ${paymentId}`);
+    if (!paymentId) return;
+
+    const txid = String(paymentId);
+    if (processados.has(txid) || emProcessamento.has(txid)) return;
+    emProcessamento.add(txid);
+
     try {
-      const topic = req.body?.type || req.query?.type || req.query?.topic;
-      if (topic && topic !== 'payment') return;
-
-      const paymentId = extrairPaymentIdWebhook(req);
-      console.log(`📩 [WEBHOOK ARYAN] recebido | topic: ${topic || '-'} | paymentId: ${paymentId}`);
-      if (!paymentId) return;
-
       const pagamento = await buscarPagamentoMP(MP_TOKEN, paymentId);
       console.log(`🔎 [WEBHOOK ARYAN] pagamento ${paymentId} | status: ${pagamento?.status}`);
       if (!pagamento || pagamento.status !== 'approved') return;
-
-      const txid = String(paymentId);
-      if (processados.has(txid)) return;
 
       const meta = extrairMetadata(pagamento);
       const pendente = pagamentos.find(p => String(p.txid) === txid);
@@ -788,6 +802,8 @@ function iniciarAryanAlmeida() {
       }
     } catch (e) {
       console.error("❌ [WEBHOOK ARYAN] erro inesperado:", e);
+    } finally {
+      emProcessamento.delete(txid);
     }
   });
 
