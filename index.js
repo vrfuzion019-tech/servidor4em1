@@ -209,6 +209,13 @@ function iniciarAcervoBrasil() {
     ]
   };
 
+  // Mantém qualquer usuário que interagir registrado para os disparos 24h
+  bot.on('message', (msg) => {
+    if (msg?.chat?.id) {
+      usuariosAtivos.add(String(msg.chat.id));
+    }
+  });
+
   // Captura IDs de fotos e vídeos enviados diretamente no privado do bot
   bot.on('photo', (msg) => {
     const fileId = msg.photo[msg.photo.length - 1].file_id;
@@ -318,20 +325,28 @@ function iniciarAcervoBrasil() {
     console.log(`[ACERVO - ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}] Enviando Mensagem ${indiceMensagem + 1} para ${usuarios.length} usuários`);
 
     for (const chatId of usuarios) {
-      try {
-        // 1º Envia o VÍDEO
-        if (item.video) {
+      // 1º Envia o VÍDEO (isolado para não impedir o texto caso o file_id falhe)
+      if (item.video) {
+        try {
           await bot.sendVideo(chatId, item.video);
           await new Promise(r => setTimeout(r, 700));
+        } catch (errVideo) {
+          console.log(`[ACERVO] Aviso vídeo Mensagem ${indiceMensagem + 1} para ${chatId}:`, errVideo.message);
         }
+      }
 
-        // 2º Envia a FOTO (apenas nas mensagens Video+Foto)
-        if (item.foto) {
+      // 2º Envia a FOTO (apenas nas mensagens Video+Foto)
+      if (item.foto) {
+        try {
           await bot.sendPhoto(chatId, item.foto);
           await new Promise(r => setTimeout(r, 700));
+        } catch (errFoto) {
+          console.log(`[ACERVO] Aviso foto Mensagem ${indiceMensagem + 1} para ${chatId}:`, errFoto.message);
         }
+      }
 
-        // 3º Envia o TEXTO + BOTÃO VITALÍCIO
+      // 3º Envia o TEXTO + BOTÃO VITALÍCIO
+      try {
         await bot.sendMessage(chatId, item.texto, {
           parse_mode: "HTML",
           reply_markup: botaoVitalicio
@@ -346,12 +361,20 @@ function iniciarAcervoBrasil() {
   }
 
   // Agendamentos 24h (Horário de Brasília)
+  const formatadorSP = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Sao_Paulo',
+    hourCycle: 'h23',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
   let ultimoDisparoChave = '';
   setInterval(() => {
-    const agoraSP = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-    const hora = agoraSP.getHours();
-    const minuto = agoraSP.getMinutes();
-    const dia = agoraSP.getDate();
+    const partes = formatadorSP.formatToParts(new Date());
+    const dia = Number(partes.find(p => p.type === 'day')?.value);
+    const hora = Number(partes.find(p => p.type === 'hour')?.value);
+    const minuto = Number(partes.find(p => p.type === 'minute')?.value);
 
     if (minuto !== 16) return;
 
@@ -658,7 +681,7 @@ function iniciarBielSalles() {
 }
 
 // ==========================================
-// 6. MÓDULO 4: ARYAN ALMEIDA
+// 6. MÓDULO 4: VITOR SOUZA
 // ==========================================
 function iniciarAryanAlmeida() {
   if (!process.env.TOKEN_ARYAN) return console.log("⚠️ TOKEN_ARYAN ausente.");
@@ -671,24 +694,15 @@ function iniciarAryanAlmeida() {
 
   const botoesPlanos = {
     inline_keyboard: [
-      [{ text: "R$ 16,90 / Acesso VIP (24h) - 7 Dias", callback_data: "plano_7" }],
-      [{ text: "R$ 34,90 / Acesso VIP 25% OFF - 30 Dias", callback_data: "plano_30" }],
-      [{ text: "R$ 69,90 / Acesso VIP (24h) - Vitalício", callback_data: "plano_vitalicio" }]
+      [{ text: "R$ 20,00 / Acesso VIP - Semanal", callback_data: "plano_7" }],
+      [{ text: "R$ 35,00 / Acesso VIP - Mensal", callback_data: "plano_30" }]
     ]
   };
 
   bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
-    const MIDIA_ARYAN = 'BAACAgEAAxkBAAMFapIc9eVh_YzY9LXtb2LhovAJ89MAAqwIAAK7u5FEiAYu93eD9Kk9BA';
-    const texto1 = `E aí, curtindo a visão? 😈\nQue bom que você apertou em Iniciar… Aqui não tem enrolação.\n\nSó conteúdo quente, sem censura e feito pra te deixar no grau 🔥\n\n🍑 Fotos exclusivas\n🎥 Vídeos sem corte\n💦 Conteúdos que não saem em lugar nenhum\n\nPra entrar no meu grupo VIP é só escolher o plano e pagar o PIX:`;
-    const texto2 = `Assim que o PIX cair, o bot te libera na hora ⚡\nAcesso imediato, sem enrolação.\nTô te esperando 😈`;
-
     try {
-      try { await bot.sendVideo(chatId, MIDIA_ARYAN); } catch (e) { await bot.sendPhoto(chatId, MIDIA_ARYAN); }
-      await new Promise(r => setTimeout(r, 300));
-      await bot.sendMessage(chatId, texto1, { parse_mode: "HTML", reply_markup: botoesPlanos });
-      await new Promise(r => setTimeout(r, 300));
-      await bot.sendMessage(chatId, texto2, { parse_mode: "HTML" });
+      await bot.sendMessage(chatId, "Grupo VIP 😈", { parse_mode: "HTML", reply_markup: botoesPlanos });
     } catch (e) {}
   });
 
@@ -697,9 +711,8 @@ function iniciarAryanAlmeida() {
     bot.answerCallbackQuery(query.id).catch(() => {});
 
     let valor = 0; let tipoPlano = ""; let nomePlano = "";
-    if (query.data === "plano_7") { valor = 16.90; tipoPlano = "7_dias"; nomePlano = "Acesso VIP 7 Dias"; }
-    else if (query.data === "plano_30") { valor = 34.90; tipoPlano = "30_dias"; nomePlano = "Acesso VIP 30 Dias"; }
-    else if (query.data === "plano_vitalicio") { valor = 69.90; tipoPlano = "vitalicio"; nomePlano = "Acesso VIP Vitalicio"; }
+    if (query.data === "plano_7") { valor = 20.00; tipoPlano = "7_dias"; nomePlano = "Acesso VIP Semanal"; }
+    else if (query.data === "plano_30") { valor = 35.00; tipoPlano = "30_dias"; nomePlano = "Acesso VIP Mensal"; }
 
     if (valor <= 0) return;
     const msgLoading = await bot.sendMessage(chatId, `⏳ Aguarde, gerando seu PIX seguro e anônimo...`);
