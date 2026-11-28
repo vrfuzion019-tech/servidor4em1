@@ -9,7 +9,7 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 const PORT = process.env.PORT || 3000;
-const MP_API = "https://api.mercadopago.com";
+const WIINPAY_API = "https://api-v2.wiinpay.com.br";
 
 function getPublicUrl() {
   const url = process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '';
@@ -17,7 +17,7 @@ function getPublicUrl() {
 }
 
 app.get('/', (req, res) => {
-  res.send(`🟢 Super Servidor ONLINE! Rodando 4 Bots simultaneamente (Mercado Pago).`);
+  res.send(`🟢 Super Servidor ONLINE! Rodando 4 Bots simultaneamente (WiinPay).`);
 });
 
 app.listen(PORT, '0.0.0.0', () => {
@@ -25,93 +25,40 @@ app.listen(PORT, '0.0.0.0', () => {
 });
 
 // ==========================================
-// 2. FUNÇÕES GLOBAIS DO MERCADO PAGO
+// 2. FUNÇÕES GLOBAIS DA WIINPAY
 // ==========================================
-function gerarIdempotencyKey(prefix = 'pix') {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+function objetoPagamento(payload) {
+  if (!payload || typeof payload !== 'object') return {};
+  if (payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)) return payload.data;
+  if (Array.isArray(payload.data) && payload.data[0]) return payload.data[0];
+  if (payload.payment && typeof payload.payment === 'object') return payload.payment;
+  return payload;
 }
 
-async function criarPagamentoPixMP({ accessToken, valor, nome, email, descricao, metadata, notificationUrl }) {
-  if (!accessToken) {
-    throw new Error("Access Token do Mercado Pago não configurado (MP_ACCESS_TOKEN).");
-  }
-
-  const bodyPayload = {
-    transaction_amount: Number(Number(valor).toFixed(2)),
-    description: descricao,
-    payment_method_id: "pix",
-    payer: {
-      email: email || "cliente@vip.com",
-      first_name: nome || "Cliente"
-    },
-    metadata: metadata || {}
-  };
-
-  if (notificationUrl && notificationUrl.startsWith("https://")) {
-    bodyPayload.notification_url = notificationUrl;
-  }
-
-  const res = await fetch(`${MP_API}/v1/payments`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${accessToken}`,
-      'X-Idempotency-Key': gerarIdempotencyKey(metadata?.chatId || 'vip')
-    },
-    body: JSON.stringify(bodyPayload)
-  });
-
-  const data = await res.json();
-  if (!res.ok) {
-    console.error("❌ Erro ao criar Pix no Mercado Pago:", JSON.stringify(data));
-    throw new Error(data?.message || "Erro ao criar pagamento no Mercado Pago");
-  }
-
-  const qrCode =
-    data?.point_of_interaction?.transaction_data?.qr_code ||
-    data?.qr_code ||
-    null;
-
-  const paymentId = data?.id || null;
-
-  console.log(`✅ Pix MP criado | paymentId: ${paymentId} | valor: ${valor} | chatId: ${metadata?.chatId}`);
-  return { paymentId, qrCode, raw: data };
+function extrairStatus(payload) {
+  const obj = objetoPagamento(payload);
+  const bruto = obj.status ?? obj.payment_status ?? obj.state ?? obj.situation ?? '';
+  return String(bruto).toLowerCase().trim();
 }
 
-async function buscarPagamentoMP(accessToken, paymentId) {
-  if (!accessToken || !paymentId) {
-    console.error("❌ Token ou paymentId ausente ao consultar pagamento MP.");
-    return null;
-  }
-
-  const res = await fetch(`${MP_API}/v1/payments/${encodeURIComponent(String(paymentId))}`, {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${accessToken}`
-    }
-  });
-
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    console.error(`❌ Falha ao consultar pagamento ${paymentId} no Mercado Pago (HTTP ${res.status}):`, JSON.stringify(data));
-    return null;
-  }
-
-  return data;
+function pagamentoAprovado(payload) {
+  const s = extrairStatus(payload);
+  return ['paid', 'pago', 'approved', 'aprovado', 'completed', 'success', 'liquidado'].includes(s);
 }
 
-function extrairPaymentIdWebhook(req) {
-  return (
-    req.body?.data?.id ||
-    req.query?.['data.id'] ||
-    req.query?.id ||
-    (req.body?.resource && /^\d+$/.test(String(req.body.resource)) ? String(req.body.resource) : null) ||
-    null
-  );
+function extrairPaymentId(payload) {
+  const obj = objetoPagamento(payload);
+  return obj.paymentId || obj.payment_id || obj.id || obj.txid || payload.paymentId || payload.id || null;
 }
 
-function extrairMetadata(pagamento) {
-  const meta = pagamento?.metadata || {};
+function extrairQrCode(payload) {
+  const obj = objetoPagamento(payload);
+  return obj.qr_code || obj.qrCode || obj.copia_cola || obj.brCode || obj.pix_code || obj.code || null;
+}
+
+function extrairMetadata(payload) {
+  const obj = objetoPagamento(payload);
+  const meta = obj.metadata || payload.metadata || {};
   if (typeof meta === 'string') {
     try { return JSON.parse(meta); } catch (e) { return {}; }
   }
@@ -159,7 +106,7 @@ function iniciarAcervoBrasil() {
 
   const bot = new TelegramBot(process.env.TOKEN_ACERVO, { polling: true });
   const CHANNEL_ID = process.env.CHANNEL_ACERVO;
-  const MP_TOKEN = process.env.MP_TOKEN_ACERVO || process.env.MP_ACCESS_TOKEN;
+  const WIINPAY_TOKEN = process.env.WIINPAY_TOKEN_ACERVO || process.env.WIINPAY_TOKEN;
   const pagamentosPendentes = new Map();
   const processados = new Set();
   const emProcessamento = new Set();
@@ -248,25 +195,31 @@ function iniciarAcervoBrasil() {
 
     try {
       const URL_WEBHOOK = `${getPublicUrl()}/webhook/acervo`;
-      const { qrCode, paymentId } = await criarPagamentoPixMP({
-        accessToken: MP_TOKEN,
-        valor,
-        nome: "Cliente Kelly Mentorias",
-        email: "vip@kellymentorias.com",
-        descricao: "Kelly Mentorias",
-        metadata: { chatId: String(chatId), plano },
-        notificationUrl: URL_WEBHOOK
+      const res = await fetch(`${WIINPAY_API}/payment/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          api_key: WIINPAY_TOKEN,
+          value: valor,
+          name: "Cliente Kelly Mentorias",
+          email: "vip@kellymentorias.com",
+          description: "Kelly Mentorias",
+          metadata: { chatId: String(chatId), plano: plano },
+          webhook_url: URL_WEBHOOK
+        })
       });
-
+      const json = await res.json();
       bot.deleteMessage(chatId, msgL.message_id).catch(() => {});
-      if (!qrCode || !paymentId) throw new Error("Erro PIX");
+      const qr = extrairQrCode(json);
+      const txid = extrairPaymentId(json);
+      if (!qr) throw new Error("Erro PIX");
 
       await bot.sendMessage(
         chatId,
-        `💳 <b>PIX GERADO COM SUCESSO</b>\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n<code>${qrCode}</code>\n\n📌 Toca no código aí em cima pra copiar.\n\n✅ O link do grupo sai na hora!`,
+        `💳 <b>PIX GERADO COM SUCESSO</b>\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n<code>${qr}</code>\n\n📌 Toca no código aí em cima pra copiar.\n\n✅ O link do grupo sai na hora!`,
         { parse_mode: "HTML" }
       );
-      pagamentosPendentes.set(String(chatId), { timestamp: Date.now(), etapa: 0, paymentId: String(paymentId) });
+      pagamentosPendentes.set(String(chatId), { timestamp: Date.now(), etapa: 0, paymentId: txid ? String(txid) : null });
     } catch (e) {
       bot.deleteMessage(chatId, msgL.message_id).catch(() => {});
       bot.sendMessage(chatId, "⚠️ Instabilidade. Tenta de novo.");
@@ -275,31 +228,24 @@ function iniciarAcervoBrasil() {
 
   app.post('/webhook/acervo', async (req, res) => {
     res.send('ok');
-    const topic = req.body?.type || req.query?.type || req.query?.topic;
-    if (topic && topic !== 'payment') return;
+    const payload = req.body || {};
+    if (!pagamentoAprovado(payload)) return;
 
-    const paymentId = extrairPaymentIdWebhook(req);
-    console.log(`📩 [WEBHOOK ACERVO] recebido | topic: ${topic || '-'} | paymentId: ${paymentId}`);
-    if (!paymentId) return;
+    const txid = extrairPaymentId(payload);
+    const meta = extrairMetadata(payload);
+    const chatId = meta.chatId || meta.chat_id ? String(meta.chatId || meta.chat_id) : null;
+    const plano = meta.plano;
 
-    const chave = String(paymentId);
+    if (!chatId) {
+      console.error(`❌ [WEBHOOK ACERVO] chatId ausente no metadata do pagamento ${txid}`);
+      return;
+    }
+
+    const chave = String(txid || `${chatId}-${plano}`);
     if (processados.has(chave) || emProcessamento.has(chave)) return;
     emProcessamento.add(chave);
 
     try {
-      const pagamento = await buscarPagamentoMP(MP_TOKEN, paymentId);
-      console.log(`🔎 [WEBHOOK ACERVO] pagamento ${paymentId} | status: ${pagamento?.status}`);
-      if (!pagamento || pagamento.status !== 'approved') return;
-
-      const meta = extrairMetadata(pagamento);
-      const chatId = meta.chatId || meta.chat_id ? String(meta.chatId || meta.chat_id) : null;
-      const plano = meta.plano;
-
-      if (!chatId) {
-        console.error(`❌ [WEBHOOK ACERVO] chatId ausente no metadata do pagamento ${paymentId}`);
-        return;
-      }
-
       pagamentosPendentes.delete(chatId);
       usuariosAtivos.delete(chatId);
 
@@ -420,7 +366,7 @@ function iniciarMlkBrasileiro() {
 
   const bot = new TelegramBot(process.env.TOKEN_TRIBO, { polling: true });
   const CHANNEL_ID = process.env.CHANNEL_TRIBO;
-  const MP_TOKEN = process.env.MP_TOKEN_TRIBO || process.env.MP_ACCESS_TOKEN;
+  const WIINPAY_TOKEN = process.env.WIINPAY_TOKEN_TRIBO || process.env.WIINPAY_TOKEN;
   const vitalicios = [];
   const pagamentosPendentes = new Map();
   const processados = new Set();
@@ -460,25 +406,31 @@ function iniciarMlkBrasileiro() {
 
     try {
       const URL_WEBHOOK = `${getPublicUrl()}/webhook/tribo`;
-      const { qrCode, paymentId } = await criarPagamentoPixMP({
-        accessToken: MP_TOKEN,
-        valor,
-        nome: "Cliente Kelly Mentorias",
-        email: "vip@kellymentorias.com",
-        descricao: "Kelly Mentorias",
-        metadata: { chatId: String(chatId), plano },
-        notificationUrl: URL_WEBHOOK
+      const res = await fetch(`${WIINPAY_API}/payment/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          api_key: WIINPAY_TOKEN,
+          value: valor,
+          name: "Cliente Kelly Mentorias",
+          email: "vip@kellymentorias.com",
+          description: "Kelly Mentorias",
+          metadata: { chatId: String(chatId), plano: plano },
+          webhook_url: URL_WEBHOOK
+        })
       });
-
+      const json = await res.json();
       bot.deleteMessage(chatId, msgL.message_id).catch(() => {});
-      if (!qrCode || !paymentId) throw new Error("Erro PIX");
+      const qr = extrairQrCode(json);
+      const txid = extrairPaymentId(json);
+      if (!qr) throw new Error("Erro PIX");
 
       await bot.sendMessage(
         chatId,
-        `💳 <b>PIX GERADO NO ESQUEMA</b>\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n<code>${qrCode}</code>\n\n📌 Toca no código aí em cima pra copiar.\n\n✅ O acesso cai na hora!`,
+        `💳 <b>PIX GERADO NO ESQUEMA</b>\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n<code>${qr}</code>\n\n📌 Toca no código aí em cima pra copiar.\n\n✅ O acesso cai na hora!`,
         { parse_mode: "HTML" }
       );
-      pagamentosPendentes.set(String(chatId), { timestamp: Date.now(), etapa: 0, paymentId: String(paymentId) });
+      pagamentosPendentes.set(String(chatId), { timestamp: Date.now(), etapa: 0, paymentId: txid ? String(txid) : null });
     } catch (e) {
       bot.deleteMessage(chatId, msgL.message_id).catch(() => {});
       bot.sendMessage(chatId, "⚠️ Instabilidade. Tenta de novo rapidinho.");
@@ -487,31 +439,24 @@ function iniciarMlkBrasileiro() {
 
   app.post('/webhook/tribo', async (req, res) => {
     res.send('ok');
-    const topic = req.body?.type || req.query?.type || req.query?.topic;
-    if (topic && topic !== 'payment') return;
+    const payload = req.body || {};
+    if (!pagamentoAprovado(payload)) return;
 
-    const paymentId = extrairPaymentIdWebhook(req);
-    console.log(`📩 [WEBHOOK TRIBO] recebido | topic: ${topic || '-'} | paymentId: ${paymentId}`);
-    if (!paymentId) return;
+    const txid = extrairPaymentId(payload);
+    const meta = extrairMetadata(payload);
+    const chatId = meta.chatId || meta.chat_id ? String(meta.chatId || meta.chat_id) : null;
+    const plano = meta.plano;
 
-    const chave = String(paymentId);
+    if (!chatId) {
+      console.error(`❌ [WEBHOOK TRIBO] chatId ausente no metadata do pagamento ${txid}`);
+      return;
+    }
+
+    const chave = String(txid || `${chatId}-${plano}`);
     if (processados.has(chave) || emProcessamento.has(chave)) return;
     emProcessamento.add(chave);
 
     try {
-      const pagamento = await buscarPagamentoMP(MP_TOKEN, paymentId);
-      console.log(`🔎 [WEBHOOK TRIBO] pagamento ${paymentId} | status: ${pagamento?.status}`);
-      if (!pagamento || pagamento.status !== 'approved') return;
-
-      const meta = extrairMetadata(pagamento);
-      const chatId = meta.chatId || meta.chat_id ? String(meta.chatId || meta.chat_id) : null;
-      const plano = meta.plano;
-
-      if (!chatId) {
-        console.error(`❌ [WEBHOOK TRIBO] chatId ausente no metadata do pagamento ${paymentId}`);
-        return;
-      }
-
       pagamentosPendentes.delete(chatId);
       const entregue = await entregarLinkCanal({
         bot,
@@ -519,7 +464,7 @@ function iniciarMlkBrasileiro() {
         chatId,
         mensagemSucesso: (link) => plano === 'vitalicio'
           ? `🎉 <b>PAGAMENTO APROVADO, CRIA!</b>\n\nLink do Grupo VIP: ${link}\n\n⚠️ <b>VISÃO:</b> Tu é Vitalício! Se der caô no grupo, digita /resgatar aqui no bot!`
-          : `🎉 <b>PAGAMENTO APROVADO, CRIA!</b>\n\nLink do Grupo VIP: ${link}`
+          : `🎉 <b>PAGAMENTO APROVADO, CRIA!</b>\n\nLink do Grupo VIP (30 dias): ${link}`
       });
 
       if (entregue) {
@@ -553,7 +498,7 @@ function iniciarBielSalles() {
 
   const bot = new TelegramBot(process.env.TOKEN_BIEL, { polling: true });
   const CHANNEL_ID = process.env.CHANNEL_BIEL;
-  const MP_TOKEN = process.env.MP_TOKEN_BIEL || process.env.MP_ACCESS_TOKEN;
+  const WIINPAY_KEY = process.env.WIINPAY_TOKEN_BIEL || process.env.WIINPAY_TOKEN;
 
   const pagamentos = []; const assinantes = []; const processados = new Set();
   const emProcessamento = new Set();
@@ -595,22 +540,28 @@ function iniciarBielSalles() {
 
     try {
       const URL_WEBHOOK = `${getPublicUrl()}/webhook/biel`;
-      const { qrCode, paymentId } = await criarPagamentoPixMP({
-        accessToken: MP_TOKEN,
-        valor,
-        nome: "Cliente Kelly Mentorias",
-        email: "vip@kellymentorias.com",
-        descricao: "Kelly Mentorias",
-        metadata: { chatId: String(chatId), plano: tipoPlano },
-        notificationUrl: URL_WEBHOOK
+      const response = await fetch(`${WIINPAY_API}/payment/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          api_key: WIINPAY_KEY,
+          value: valor,
+          name: "Cliente Kelly Mentorias",
+          email: "vip@kellymentorias.com",
+          description: "Kelly Mentorias",
+          metadata: { chatId: String(chatId), plano: tipoPlano },
+          webhook_url: URL_WEBHOOK
+        })
       });
-
+      const json = await response.json();
       bot.deleteMessage(chatId, msgLoading.message_id).catch(() => {});
-      if (!qrCode || !paymentId) throw new Error("Sem QR Code");
+      const qrcode = extrairQrCode(json);
+      const txid = extrairPaymentId(json);
+      if (!qrcode) throw new Error("Sem QR Code");
 
-      const texto = `💳 PIX GERADO COM SUCESSO\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n📋 Código PIX (Copia e Cola):\n\n\`${qrCode}\`\n\n📌 Toque no código acima para copiar.\n\n⏳ O acesso é liberado automaticamente após o pagamento.`;
+      const texto = `💳 PIX GERADO COM SUCESSO\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n📋 Código PIX (Copia e Cola):\n\n\`${qrcode}\`\n\n📌 Toque no código acima para copiar.\n\n⏳ O acesso é liberado automaticamente após o pagamento.`;
       const mensagemPix = await bot.sendMessage(chatId, texto, { parse_mode: "Markdown" });
-      pagamentos.push({ txid: String(paymentId), chatId: String(chatId), mensagemId: String(mensagemPix.message_id), status: "pending", createdAt: Date.now(), etapaFunil: 0, plano: tipoPlano });
+      pagamentos.push({ txid: txid ? String(txid) : '', chatId: String(chatId), mensagemId: String(mensagemPix.message_id), status: "pending", createdAt: Date.now(), etapaFunil: 0, plano: tipoPlano });
     } catch (e) {
       bot.deleteMessage(chatId, msgLoading.message_id).catch(() => {});
       bot.sendMessage(chatId, "⚠️ Sistema indisponível.");
@@ -619,33 +570,26 @@ function iniciarBielSalles() {
 
   app.post('/webhook/biel', async (req, res) => {
     res.status(200).json({ ok: true });
-    const topic = req.body?.type || req.query?.type || req.query?.topic;
-    if (topic && topic !== 'payment') return;
+    const payload = req.body || {};
+    if (!pagamentoAprovado(payload)) return;
 
-    const paymentId = extrairPaymentIdWebhook(req);
-    console.log(`📩 [WEBHOOK BIEL] recebido | topic: ${topic || '-'} | paymentId: ${paymentId}`);
-    if (!paymentId) return;
+    const txid = extrairPaymentId(payload);
+    const meta = extrairMetadata(payload);
+    const pendente = txid ? pagamentos.find(p => String(p.txid) === String(txid)) : null;
+    const chatId = (meta.chatId || meta.chat_id || pendente?.chatId) ? String(meta.chatId || meta.chat_id || pendente?.chatId) : null;
+    const plano = meta.plano || pendente?.plano;
+    const mensagemId = pendente?.mensagemId;
 
-    const txid = String(paymentId);
-    if (processados.has(txid) || emProcessamento.has(txid)) return;
-    emProcessamento.add(txid);
+    if (!chatId) {
+      console.error(`❌ [WEBHOOK BIEL] chatId ausente no pagamento ${txid}`);
+      return;
+    }
+
+    const chave = String(txid || `${chatId}-${plano}`);
+    if (processados.has(chave) || emProcessamento.has(chave)) return;
+    emProcessamento.add(chave);
 
     try {
-      const pagamento = await buscarPagamentoMP(MP_TOKEN, paymentId);
-      console.log(`🔎 [WEBHOOK BIEL] pagamento ${paymentId} | status: ${pagamento?.status}`);
-      if (!pagamento || pagamento.status !== 'approved') return;
-
-      const meta = extrairMetadata(pagamento);
-      const pendente = pagamentos.find(p => String(p.txid) === txid);
-      const chatId = (meta.chatId || meta.chat_id || pendente?.chatId) ? String(meta.chatId || meta.chat_id || pendente?.chatId) : null;
-      const plano = meta.plano || pendente?.plano;
-      const mensagemId = pendente?.mensagemId;
-
-      if (!chatId) {
-        console.error(`❌ [WEBHOOK BIEL] chatId ausente no pagamento ${txid}`);
-        return;
-      }
-
       if (pendente) pendente.status = 'approved';
       if (mensagemId) try { await bot.deleteMessage(chatId, mensagemId); } catch (e) {}
 
@@ -657,7 +601,7 @@ function iniciarBielSalles() {
       });
 
       if (entregue) {
-        processados.add(txid);
+        processados.add(chave);
         const agora = Date.now(); let validade = null;
         if (plano === '7_dias') validade = agora + (7 * 24 * 60 * 60 * 1000);
         else if (plano === '30_dias') validade = agora + (30 * 24 * 60 * 60 * 1000);
@@ -666,7 +610,7 @@ function iniciarBielSalles() {
     } catch (e) {
       console.error("❌ [WEBHOOK BIEL] erro inesperado:", e);
     } finally {
-      emProcessamento.delete(txid);
+      emProcessamento.delete(chave);
     }
   });
 
@@ -700,7 +644,7 @@ function iniciarAryanAlmeida() {
 
   const bot = new TelegramBot(process.env.TOKEN_ARYAN, { polling: true });
   const CHANNEL_ID = process.env.CHANNEL_ARYAN;
-  const MP_TOKEN = process.env.MP_TOKEN_ARYAN || process.env.MP_ACCESS_TOKEN;
+  const WIINPAY_KEY = process.env.WIINPAY_TOKEN_ARYAN || process.env.WIINPAY_TOKEN;
 
   const pagamentos = []; const assinantes = []; const processados = new Set();
   const emProcessamento = new Set();
@@ -732,22 +676,28 @@ function iniciarAryanAlmeida() {
 
     try {
       const URL_WEBHOOK = `${getPublicUrl()}/webhook/aryan`;
-      const { qrCode, paymentId } = await criarPagamentoPixMP({
-        accessToken: MP_TOKEN,
-        valor,
-        nome: "Cliente Kelly Mentorias",
-        email: "vip@kellymentorias.com",
-        descricao: "Kelly Mentorias",
-        metadata: { chatId: String(chatId), plano: tipoPlano },
-        notificationUrl: URL_WEBHOOK
+      const response = await fetch(`${WIINPAY_API}/payment/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          api_key: WIINPAY_KEY,
+          value: valor,
+          name: "Cliente Kelly Mentorias",
+          email: "vip@kellymentorias.com",
+          description: "Kelly Mentorias",
+          metadata: { chatId: String(chatId), plano: tipoPlano },
+          webhook_url: URL_WEBHOOK
+        })
       });
-
+      const json = await response.json();
       bot.deleteMessage(chatId, msgLoading.message_id).catch(() => {});
-      if (!qrCode || !paymentId) throw new Error("Sem QR Code");
+      const qrcode = extrairQrCode(json);
+      const txid = extrairPaymentId(json);
+      if (!qrcode) throw new Error("Sem QR Code");
 
-      const texto = `💳 PIX GERADO COM SUCESSO\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n📋 Código PIX (Copia e Cola):\n\n\`${qrCode}\`\n\n📌 Toque no código acima para copiar.\n\n⏳ O acesso é liberado automaticamente após o pagamento.`;
+      const texto = `💳 PIX GERADO COM SUCESSO\n\n💰 Valor: R$ ${valor.toFixed(2).replace('.', ',')}\n\n📋 Código PIX (Copia e Cola):\n\n\`${qrcode}\`\n\n📌 Toque no código acima para copiar.\n\n⏳ O acesso é liberado automaticamente após o pagamento.`;
       const mensagemPix = await bot.sendMessage(chatId, texto, { parse_mode: "Markdown" });
-      pagamentos.push({ txid: String(paymentId), chatId: String(chatId), mensagemId: String(mensagemPix.message_id), status: "pending", createdAt: Date.now(), etapaFunil: 0, plano: tipoPlano });
+      pagamentos.push({ txid: txid ? String(txid) : '', chatId: String(chatId), mensagemId: String(mensagemPix.message_id), status: "pending", createdAt: Date.now(), etapaFunil: 0, plano: tipoPlano });
     } catch (e) {
       bot.deleteMessage(chatId, msgLoading.message_id).catch(() => {});
       bot.sendMessage(chatId, "⚠️ Sistema indisponível.");
@@ -756,33 +706,26 @@ function iniciarAryanAlmeida() {
 
   app.post('/webhook/aryan', async (req, res) => {
     res.status(200).json({ ok: true });
-    const topic = req.body?.type || req.query?.type || req.query?.topic;
-    if (topic && topic !== 'payment') return;
+    const payload = req.body || {};
+    if (!pagamentoAprovado(payload)) return;
 
-    const paymentId = extrairPaymentIdWebhook(req);
-    console.log(`📩 [WEBHOOK ARYAN] recebido | topic: ${topic || '-'} | paymentId: ${paymentId}`);
-    if (!paymentId) return;
+    const txid = extrairPaymentId(payload);
+    const meta = extrairMetadata(payload);
+    const pendente = txid ? pagamentos.find(p => String(p.txid) === String(txid)) : null;
+    const chatId = (meta.chatId || meta.chat_id || pendente?.chatId) ? String(meta.chatId || meta.chat_id || pendente?.chatId) : null;
+    const plano = meta.plano || pendente?.plano;
+    const mensagemId = pendente?.mensagemId;
 
-    const txid = String(paymentId);
-    if (processados.has(txid) || emProcessamento.has(txid)) return;
-    emProcessamento.add(txid);
+    if (!chatId) {
+      console.error(`❌ [WEBHOOK ARYAN] chatId ausente no pagamento ${txid}`);
+      return;
+    }
+
+    const chave = String(txid || `${chatId}-${plano}`);
+    if (processados.has(chave) || emProcessamento.has(chave)) return;
+    emProcessamento.add(chave);
 
     try {
-      const pagamento = await buscarPagamentoMP(MP_TOKEN, paymentId);
-      console.log(`🔎 [WEBHOOK ARYAN] pagamento ${paymentId} | status: ${pagamento?.status}`);
-      if (!pagamento || pagamento.status !== 'approved') return;
-
-      const meta = extrairMetadata(pagamento);
-      const pendente = pagamentos.find(p => String(p.txid) === txid);
-      const chatId = (meta.chatId || meta.chat_id || pendente?.chatId) ? String(meta.chatId || meta.chat_id || pendente?.chatId) : null;
-      const plano = meta.plano || pendente?.plano;
-      const mensagemId = pendente?.mensagemId;
-
-      if (!chatId) {
-        console.error(`❌ [WEBHOOK ARYAN] chatId ausente no pagamento ${txid}`);
-        return;
-      }
-
       if (pendente) pendente.status = 'approved';
       if (mensagemId) try { await bot.deleteMessage(chatId, mensagemId); } catch (e) {}
 
@@ -794,7 +737,7 @@ function iniciarAryanAlmeida() {
       });
 
       if (entregue) {
-        processados.add(txid);
+        processados.add(chave);
         const agora = Date.now(); let validade = null;
         if (plano === '7_dias') validade = agora + (7 * 24 * 60 * 60 * 1000);
         else if (plano === '30_dias') validade = agora + (30 * 24 * 60 * 60 * 1000);
@@ -803,7 +746,7 @@ function iniciarAryanAlmeida() {
     } catch (e) {
       console.error("❌ [WEBHOOK ARYAN] erro inesperado:", e);
     } finally {
-      emProcessamento.delete(txid);
+      emProcessamento.delete(chave);
     }
   });
 
